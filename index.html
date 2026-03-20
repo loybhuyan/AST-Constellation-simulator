@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LEO Constellation Simulator</title>
+    <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+    <div id="ui">
+        <h1>AST SpaceMobile LEO Constellation config</h1>
+        
+        <div class="control-group">
+            <label>Altitude: <span id="val-altitude">690</span> km</label>
+            <input type="range" id="input-altitude" min="300" max="2000" value="690">
+        </div>
+
+        <div class="control-group">
+            <label>Inclination: <span id="val-inclination">53</span>°</label>
+            <input type="range" id="input-inclination" min="0" max="180" value="53">
+        </div>
+
+        <div class="control-group">
+            <label>Total Satellites: <span id="val-total">96</span></label>
+            <input type="range" id="input-total" min="10" max="500" value="96">
+        </div>
+
+        <div class="control-group">
+            <label>Orbital Planes: <span id="val-planes">8</span></label>
+            <input type="range" id="input-planes" min="1" max="24" value="8">
+        </div>
+
+        <hr>
+
+        <div class="control-group">
+            <label>Location Focus</label>
+            <div class="flex-row">
+                <input type="number" id="input-lat" placeholder="Lat" value="34.05">
+                <input type="number" id="input-lon" placeholder="Lon" value="-118.24">
+            </div>
+            <button id="btn-focus">Zoom to Location</button>
+            <button id="btn-reset">Reset View</button>
+        </div>
+
+        <hr>
+
+        <div class="control-group">
+            <label>Time Speed</label>
+            <input type="range" id="timeSpeed" min="0" max="100" value="10">
+        </div>
+    </div>
+    <script type="module" src="./main.js"></script>
+</body>
+</html>
