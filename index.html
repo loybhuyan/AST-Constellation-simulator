@@ -3,10 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LEO Constellation Simulator</title>
-    <link rel="stylesheet" href="./style.css">
+    <title>AST SpaceMobile LEO Simulator</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.162.0/build/three.module.js",
+                "three/examples/jsm/controls/OrbitControls.js": "https://unpkg.com/three@0.162.0/examples/jsm/controls/OrbitControls.js"
+            }
+        }
+    </script>
+
     <div id="ui">
         <h1>AST SpaceMobile LEO Constellation config</h1>
         
@@ -49,6 +58,6 @@
             <input type="range" id="timeSpeed" min="0" max="100" value="10">
         </div>
     </div>
-    <script type="module" src="./main.js"></script>
+    <script type="module" src="main.js"></script>
 </body>
 </html>
