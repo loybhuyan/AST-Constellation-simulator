@@ -6,7 +6,8 @@ let config = {
     altitude: 690,
     inclination: 53 * (Math.PI / 180),
     totalSatellites: 96,
-    planes: 8
+    planes: 96, // 1 satellite per plane
+    phasing: 56  // Phase multiple F=56
 };
 
 let time = 0;
@@ -69,7 +70,7 @@ const atmosMaterial = new THREE.MeshBasicMaterial({
 const atmosphere = new THREE.Mesh(atmosGeometry, atmosMaterial);
 scene.add(atmosphere);
 
-// Latitude Guide Lines (Helping visualize the 53 degree bounds)
+// Latitude Guide Lines
 const createLatLine = (lat, color) => {
     const rad = EARTH_RADIUS * 1.02;
     const y = rad * Math.sin(lat * Math.PI / 180);
@@ -90,14 +91,14 @@ scene.add(guideLines);
 const updateGuideLines = () => {
     while(guideLines.children.length > 0) guideLines.remove(guideLines.children[0]);
     const lat = config.inclination * (180 / Math.PI);
-    guideLines.add(createLatLine(lat, 0xff0000));  // 53N
-    guideLines.add(createLatLine(-lat, 0xff0000)); // 53S
+    guideLines.add(createLatLine(lat, 0xff0000));  // N
+    guideLines.add(createLatLine(-lat, 0xff0000)); // S
     guideLines.add(createLatLine(0, 0xffffff));    // Equator
 };
 
 updateGuideLines();
 
-// Earth Axis Tilt - REMOVED for better latitude alignment
+// Earth Orientation
 earth.rotation.y = Math.PI; 
 atmosphere.rotation.y = Math.PI;
 
@@ -110,7 +111,6 @@ const satGeometry = new THREE.SphereGeometry(60, 12, 12);
 const satMaterial = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
 
 const createConstellation = () => {
-    // Clear previous constellation
     while(constellationGroup.children.length > 0){ 
         constellationGroup.remove(constellationGroup.children[0]); 
     }
@@ -118,15 +118,19 @@ const createConstellation = () => {
 
     const satsPerPlane = Math.ceil(config.totalSatellites / config.planes);
     const orbitalRadius = EARTH_RADIUS + config.altitude;
+    
+    // Walker Delta Phasing Offset logic: F * 360 / T
+    const phaseOffsetPerPlane = (config.phasing * Math.PI * 2) / config.totalSatellites;
 
     for (let p = 0; p < config.planes; p++) {
         const raan = (p / config.planes) * Math.PI * 2;
-        
+        const planePhaseShift = p * phaseOffsetPerPlane;
+
         for (let s = 0; s < satsPerPlane; s++) {
             if (satellites.length >= config.totalSatellites) break;
 
             const sat = new THREE.Mesh(satGeometry, satMaterial);
-            const meanAnomaly = (s / satsPerPlane) * Math.PI * 2;
+            const meanAnomaly = ((s / satsPerPlane) * Math.PI * 2) + planePhaseShift;
             
             satellites.push({
                 mesh: sat,
@@ -140,14 +144,12 @@ const createConstellation = () => {
             const curve = new THREE.EllipseCurve(0, 0, orbitalRadius, orbitalRadius, 0, 2 * Math.PI, false, 0);
             const points = curve.getPoints(120);
             const pathGeometry = new THREE.BufferGeometry().setFromPoints(points);
-            const pathMaterial = new THREE.LineBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.2 });
+            const pathMaterial = new THREE.LineBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.1 });
             const pathLine = new THREE.Line(pathGeometry, pathMaterial);
             
             const orbitGroup = new THREE.Group();
             orbitGroup.add(pathLine);
-            pathLine.rotation.x = Math.PI / 2; // Start in Equatorial Plane (XZ)
-            
-            // Tilt the orbit by inclination and rotate by RAAN
+            pathLine.rotation.x = Math.PI / 2;
             orbitGroup.rotation.x = config.inclination;
             orbitGroup.rotation.y = raan;
             constellationGroup.add(orbitGroup);
@@ -160,19 +162,15 @@ createConstellation();
 const updateSatellites = () => {
     satellites.forEach((sat) => {
         const angle = sat.meanAnomaly + time;
-        
-        // 1. Position in orbital plane (relative to ascending node)
         const x_p = sat.orbitalRadius * Math.cos(angle);
-        const z_p = -sat.orbitalRadius * Math.sin(angle); // Inverted for Eastward (CW) motion
+        const z_p = -sat.orbitalRadius * Math.sin(angle);
         
-        // 2. Rotate around X-axis by inclination
         const y_incl = z_p * Math.sin(config.inclination);
         const z_incl = z_p * Math.cos(config.inclination);
         const x_incl = x_p;
         
-        // 3. Rotate around Y-axis (North axis) by RAAN
         const finalX = x_incl * Math.cos(sat.raan) + z_incl * Math.sin(sat.raan);
-        const finalY = y_incl; // Latitude component
+        const finalY = y_incl;
         const finalZ = -x_incl * Math.sin(sat.raan) + z_incl * Math.cos(sat.raan);
         
         sat.mesh.position.set(finalX, finalY, finalZ);
@@ -189,30 +187,23 @@ scene.add(focusMarker);
 const latLonToXYZ = (lat, lon, radius) => {
     const phi = (90 - lat) * (Math.PI / 180);
     const theta = (lon + 180) * (Math.PI / 180);
-    
     const x = -(radius * Math.sin(phi) * Math.cos(theta));
     const z = (radius * Math.sin(phi) * Math.sin(theta));
     const y = (radius * Math.cos(phi));
-    
     return new THREE.Vector3(x, y, z);
 };
 
-// Camera Animation state
+// Camera Animation
 let targetCameraPos = camera.position.clone();
 let isAnimating = false;
 
 const focusOnLocation = (lat, lon) => {
     const groundPos = latLonToXYZ(lat, lon, EARTH_RADIUS);
-    const viewPos = latLonToXYZ(lat, lon, EARTH_RADIUS + 3000); // 3000km altitude for view
-    
+    const viewPos = latLonToXYZ(lat, lon, EARTH_RADIUS + 3000);
     focusMarker.position.copy(groundPos);
     focusMarker.visible = true;
-    
     targetCameraPos.copy(viewPos);
     isAnimating = true;
-    
-    // Smoothly transition controls target to the ground position
-    // controls.target.copy(groundPos);
 };
 
 // UI Handling
@@ -225,9 +216,6 @@ const inputs = {
     lat: document.getElementById('input-lat'),
     lon: document.getElementById('input-lon')
 };
-
-const btnFocus = document.getElementById('btn-focus');
-const btnReset = document.getElementById('btn-reset');
 
 const vals = {
     altitude: document.getElementById('val-altitude'),
@@ -242,7 +230,6 @@ const updateConfig = () => {
     config.totalSatellites = parseInt(inputs.total.value);
     config.planes = parseInt(inputs.planes.value);
 
-    // Update UI text
     vals.altitude.innerText = inputs.altitude.value;
     vals.inclination.innerText = inputs.inclination.value;
     vals.total.innerText = inputs.total.value;
@@ -257,18 +244,17 @@ Object.keys(inputs).forEach(key => {
     input.addEventListener('input', (e) => {
         if (e.target.id === 'timeSpeed') {
             timeSpeed = parseFloat(e.target.value) / 1000;
-        } else if (['input-lat', 'input-lon'].includes(e.target.id)) {
-            // Lat/Lon don't trigger constellation update
-        } else {
+        } else if (!['input-lat', 'input-lon'].includes(e.target.id)) {
             updateConfig();
         }
     });
 });
 
+const btnFocus = document.getElementById('btn-focus');
+const btnReset = document.getElementById('btn-reset');
+
 btnFocus.addEventListener('click', () => {
-    const lat = parseFloat(inputs.lat.value);
-    const lon = parseFloat(inputs.lon.value);
-    focusOnLocation(lat, lon);
+    focusOnLocation(parseFloat(inputs.lat.value), parseFloat(inputs.lon.value));
 });
 
 btnReset.addEventListener('click', () => {
@@ -280,16 +266,11 @@ btnReset.addEventListener('click', () => {
 
 const animate = () => {
     requestAnimationFrame(animate);
-    
     if (isAnimating) {
         camera.position.lerp(targetCameraPos, 0.05);
-        if (camera.position.distanceTo(targetCameraPos) < 1) {
-            isAnimating = false;
-        }
+        if (camera.position.distanceTo(targetCameraPos) < 1) isAnimating = false;
     }
-    
     time += timeSpeed;
-    // Earth rotates West to East (CW when looking from top in our coordinate system)
     earth.rotation.y -= 0.0002;
     atmosphere.rotation.y -= 0.0002;
     updateSatellites();

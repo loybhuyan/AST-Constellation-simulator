@@ -16,9 +16,13 @@
         }
     </script>
 
-    <div id="ui">
-        <h1>AST SpaceMobile LEO Constellation config</h1>
+    <div id="ui" class="glass-panel">
+        <h1>AST SpaceMobile LEO</h1>
         
+        <div class="constellation-info">
+            Walker Delta: 53°: 96/96/56
+        </div>
+
         <div class="control-group">
             <label>Altitude: <span id="val-altitude">690</span> km</label>
             <input type="range" id="input-altitude" min="300" max="2000" value="690">
@@ -30,13 +34,13 @@
         </div>
 
         <div class="control-group">
-            <label>Total Satellites: <span id="val-total">96</span></label>
+            <label>Total Satellites (T): <span id="val-total">96</span></label>
             <input type="range" id="input-total" min="10" max="500" value="96">
         </div>
 
         <div class="control-group">
-            <label>Orbital Planes: <span id="val-planes">8</span></label>
-            <input type="range" id="input-planes" min="1" max="24" value="8">
+            <label>Orbital Planes (P): <span id="val-planes">96</span></label>
+            <input type="range" id="input-planes" min="1" max="100" value="96">
         </div>
 
         <hr>
@@ -58,6 +62,7 @@
             <input type="range" id="timeSpeed" min="0" max="100" value="10">
         </div>
     </div>
+
     <script type="module" src="main.js"></script>
 </body>
 </html>
