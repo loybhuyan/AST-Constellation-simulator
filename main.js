@@ -147,15 +147,29 @@ const createConstellation = () => {
     while(constellationGroup.children.length > 0) constellationGroup.remove(constellationGroup.children[0]);
     satellites = [];
     const orbitalRadius = EARTH_RADIUS + config.altitude;
+    
+    // Walker Delta Phasing: F * 360 / T
     const phaseOffsetPerPlane = (config.phasing * Math.PI * 2) / config.totalSatellites;
+    const satsPerPlane = Math.floor(config.totalSatellites / config.planes);
+    const remainder = config.totalSatellites % config.planes;
 
     for (let p = 0; p < config.planes; p++) {
         const raan = (p / config.planes) * Math.PI * 2;
         const planePhaseShift = p * phaseOffsetPerPlane;
-        const sat = new THREE.Mesh(satGeometry, satMaterial);
-        satellites.push({ mesh: sat, raan, meanAnomaly: planePhaseShift, orbitalRadius });
-        constellationGroup.add(sat);
+        
+        // Handle distribution even if T is not perfectly divisible by P
+        const currentPlaneSats = p < remainder ? satsPerPlane + 1 : satsPerPlane;
 
+        for (let s = 0; s < currentPlaneSats; s++) {
+            const sat = new THREE.Mesh(satGeometry, satMaterial);
+            // Even spacing within this specific plane ring
+            const meanAnomaly = ((s / currentPlaneSats) * Math.PI * 2) + planePhaseShift;
+            
+            satellites.push({ mesh: sat, raan, meanAnomaly, orbitalRadius });
+            constellationGroup.add(sat);
+        }
+
+        // Draw the orbital ring path for this plane
         const curve = new THREE.EllipseCurve(0, 0, orbitalRadius, orbitalRadius, 0, 2 * Math.PI, false, 0);
         const pathLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(120)), new THREE.LineBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.1 }));
         const orbitGroup = new THREE.Group();
