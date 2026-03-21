@@ -47,21 +47,24 @@
 
         <!-- Ground Station Toggle -->
         <div class="control-group">
-            <label style="display: flex; justify-content: space-between; align-items: center;">
-                Midland GW Connectivity
-                <input type="checkbox" id="gs-toggle" style="width: auto;">
-            </label>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <label>Gateway View</label>
+                <label class="switch">
+                    <input type="checkbox" id="gs-toggle">
+                    <span class="slider round"></span>
+                </label>
+            </div>
             <div id="gs-status-box" style="display: none; margin-top: 15px; padding: 10px; background: rgba(0, 255, 204, 0.1); border-radius: 6px; border: 1px solid rgba(0, 255, 204, 0.2); text-align: center;">
-                <div style="font-size: 0.7rem; color: #888; text-transform: uppercase;">Midland Status</div>
+                <div style="font-size: 0.7rem; color: #888; text-transform: uppercase;">Connected Antennas</div>
                 <div id="conn-state" style="font-size: 1rem; font-weight: bold; margin: 5px 0; color: #00ff00;">CONNECTED</div>
                 <div style="font-size: 0.7rem; color: #888;">Elevation: <span id="conn-elev" style="color: #fff; font-weight: bold;">---</span></div>
             </div>
         </div>
 
-        <!-- Satellite Links Toggle (Multi-link) -->
+        <!-- Antennas Toggle (Multi-link) -->
         <div class="control-group">
-            <label>Satellite Links: <span id="val-links">1</span></label>
-            <input type="range" id="input-links" min="1" max="4" value="1">
+            <label>Antennas: <span id="val-antennas">1</span></label>
+            <input type="range" id="input-antennas" min="1" max="4" value="1">
         </div>
 
         <hr>

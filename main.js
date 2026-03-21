@@ -66,17 +66,24 @@ const latLonToXYZ = (lat, lon, radius) => {
 };
 
 // Static Ground Station (Midland, Texas) - Parented to Earth
-const midlandMarker = new THREE.Mesh(new THREE.SphereGeometry(100, 16, 16), new THREE.MeshBasicMaterial({ color: 0xff3366 }));
+const midlandMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(120, 16, 16), 
+    new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false }) // Pure white for high contrast
+);
+midlandMarker.renderOrder = 1000;
 const midlandPos = latLonToXYZ(31.9974, -102.0779, EARTH_RADIUS);
 midlandMarker.position.copy(midlandPos);
 midlandMarker.visible = false;
 earth.add(midlandMarker);
 
-// Coverage Area around Midland (Filled translucent circle)
-const areaRadius = 1414; 
+// Coverage Area around Midland (Light green subtle oval)
+const areaRadius = 1060; 
 const circleGeom = new THREE.CircleGeometry(areaRadius, 64);
-const circleMat = new THREE.MeshBasicMaterial({ color: 0x00ff88, side: THREE.DoubleSide, transparent: true, opacity: 0.25 });
+const circleMat = new THREE.MeshBasicMaterial({ color: 0x00ff88, side: THREE.DoubleSide, transparent: true, opacity: 0.3 });
 const coverageCircle = new THREE.Mesh(circleGeom, circleMat);
+coverageCircle.renderOrder = 900;
+
+// Parent to Midland Marker, center it locally, and align to surface
 coverageCircle.position.set(0, 0, 0); 
 coverageCircle.lookAt(midlandPos.clone().multiplyScalar(2)); 
 midlandMarker.add(coverageCircle);
@@ -162,14 +169,11 @@ const createConstellation = () => {
 
         for (let s = 0; s < currentPlaneSats; s++) {
             const sat = new THREE.Mesh(satGeometry, satMaterial);
-            // Even spacing within this specific plane ring
             const meanAnomaly = ((s / currentPlaneSats) * Math.PI * 2) + planePhaseShift;
-            
             satellites.push({ mesh: sat, raan, meanAnomaly, orbitalRadius });
             constellationGroup.add(sat);
         }
 
-        // Draw the orbital ring path for this plane
         const curve = new THREE.EllipseCurve(0, 0, orbitalRadius, orbitalRadius, 0, 2 * Math.PI, false, 0);
         const pathLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(120)), new THREE.LineBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.1 }));
         const orbitGroup = new THREE.Group();
@@ -196,19 +200,19 @@ const updateSatellites = () => {
     });
 };
 
-// Connectivity Beams (Multi-link pool)
+// Connectivity Beams (Multi-antenna pool) - BRIGHT NEON YELLOW
 const beamGroup = new THREE.Group();
 scene.add(beamGroup);
-const maxLinkCount = 4;
+const maxAntennaCount = 4;
 const beams = [];
-for (let i = 0; i < maxLinkCount; i++) {
+for (let i = 0; i < maxAntennaCount; i++) {
     const beam = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
         new THREE.LineBasicMaterial({ 
-            color: 0xffff00, 
+            color: 0xffff00, // Bright neon yellow
             transparent: true, 
-            opacity: 0.4, 
-            linewidth: 1,
+            opacity: 0.9, // High prominence
+            linewidth: 2, 
             depthTest: true 
         })
     );
@@ -224,7 +228,7 @@ const inputs = {
     total: document.getElementById('input-total'),
     planes: document.getElementById('input-planes'),
     speed: document.getElementById('timeSpeed'),
-    links: document.getElementById('input-links'),
+    antennas: document.getElementById('input-antennas'),
     toggle: document.getElementById('gs-toggle'),
     statusBox: document.getElementById('gs-status-box')
 };
@@ -234,7 +238,7 @@ const vals = {
     inclination: document.getElementById('val-inclination'),
     total: document.getElementById('val-total'),
     planes: document.getElementById('val-planes'),
-    links: document.getElementById('val-links')
+    antennas: document.getElementById('val-antennas')
 };
 
 const updateConfig = () => {
@@ -246,7 +250,7 @@ const updateConfig = () => {
     vals.inclination.innerText = inputs.inclination.value;
     vals.total.innerText = inputs.total.value;
     vals.planes.innerText = inputs.planes.value;
-    vals.links.innerText = inputs.links.value;
+    vals.antennas.innerText = inputs.antennas.value;
     createConstellation();
     updateGuideLines();
 };
@@ -256,7 +260,7 @@ Object.keys(inputs).forEach(key => {
     if (key === 'toggle' || key === 'statusBox') return;
     input.addEventListener('input', (e) => {
         if (e.target.id === 'timeSpeed') {} 
-        else if (e.target.id === 'input-links') { vals.links.innerText = e.target.value; }
+        else if (e.target.id === 'input-antennas') { vals.antennas.innerText = e.target.value; }
         else { updateConfig(); }
     });
 });
@@ -271,12 +275,9 @@ inputs.toggle.addEventListener('change', (e) => {
     inputs.statusBox.style.display = active ? 'block' : 'none';
     
     if (active) {
-        // Capture CURRENT distance
         const currentDist = camera.position.length();
         const worldPos = new THREE.Vector3();
         midlandMarker.getWorldPosition(worldPos);
-        
-        // Target at same distance
         const viewPos = worldPos.clone().normalize().multiplyScalar(currentDist);
         targetCameraPos.copy(viewPos);
         isAnimating = true;
@@ -302,13 +303,12 @@ const updateConnectivity = () => {
 
     candidates.sort((a, b) => b.elevation - a.elevation);
 
-    const linkLimit = parseInt(inputs.links.value);
-    const activeLinks = Math.min(candidates.length, linkLimit);
+    const antennaLimit = parseInt(inputs.antennas.value);
+    const activeLinks = Math.min(candidates.length, antennaLimit);
 
-    // Dynamic Coverage Circle Scaling (Capacity based)
-    const maxScale = Math.sqrt(1 / 3); 
-    const minScale = maxScale * 0.5;
-    const t = (linkLimit - 1) / 3;
+    const maxScale = 1.0; 
+    const minScale = 0.5;
+    const t = (antennaLimit - 1) / 3;
     const scaleFactor = minScale + (maxScale - minScale) * t;
     
     coverageCircle.scale.set(scaleFactor * 1.5, scaleFactor, 1);
@@ -319,7 +319,7 @@ const updateConnectivity = () => {
             beams[i].visible = true;
             beams[i].geometry.setFromPoints([worldPos, candidates[i].mesh.position]);
         }
-        document.getElementById('conn-state').innerText = activeLinks + (activeLinks === 1 ? " LINK" : " LINKS");
+        document.getElementById('conn-state').innerText = activeLinks + (activeLinks === 1 ? " ANTENNA" : " ANTENNAS");
         document.getElementById('conn-state').style.color = "#00ff00";
         document.getElementById('conn-elev').innerText = candidates[0].elevation.toFixed(1) + "°";
     } else {
@@ -333,13 +333,9 @@ const animate = () => {
     requestAnimationFrame(animate);
     
     if (isAnimating) {
-        const currentDist = camera.position.length(); // Capture current distance
+        const currentDist = camera.position.length();
         camera.position.lerp(targetCameraPos, 0.02);
-        
-        // ARC FIX: Force camera to stay on the sphere surface (constant altitude)
-        // This prevents the camera from "zooming in" as it moves between points
         camera.position.normalize().multiplyScalar(currentDist);
-        
         if (camera.position.distanceTo(targetCameraPos) < 10) {
             isAnimating = false;
         }
