@@ -19,7 +19,7 @@
     <div id="ui" class="glass-panel">
         <h1>AST SpaceMobile LEO</h1>
         
-        <div class="constellation-info">
+        <div id="constellation-info" class="constellation-info">
             Walker Delta: 53°: 96/96/56
         </div>
 
@@ -35,18 +35,31 @@
 
         <div class="control-group">
             <label>Total Satellites (T): <span id="val-total">96</span></label>
-            <input type="range" id="input-total" min="10" max="500" value="96">
+            <input type="range" id="input-total" min="1" max="192" value="96">
         </div>
 
         <div class="control-group">
             <label>Orbital Planes (P): <span id="val-planes">96</span></label>
-            <input type="range" id="input-planes" min="1" max="100" value="96">
+            <input type="range" id="input-planes" min="1" max="192" value="96">
+        </div>
+
+        <div class="control-group">
+            <label>Phasing (F): <span id="val-phasing">56</span></label>
+            <input type="range" id="input-phasing" min="0" max="100" value="56">
         </div>
 
         <hr>
 
         <!-- Ground Station Toggle -->
         <div class="control-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <label>Satellite Field of View</label>
+                <label class="switch">
+                    <input type="checkbox" id="fov-toggle" checked>
+                    <span class="slider round"></span>
+                </label>
+            </div>
+
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <label>Gateway View</label>
                 <label class="switch">

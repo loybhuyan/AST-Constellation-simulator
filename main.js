@@ -40,7 +40,7 @@ controls.addEventListener('start', () => isAnimating = false);
 
 // Lighting
 scene.add(new THREE.AmbientLight(0x404040, 2));
-const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
+const sunLight = new THREE.DirectionalLight(0xf0f8ff, 1.5);
 sunLight.position.set(5000, 3000, 5000);
 scene.add(sunLight);
 
@@ -49,19 +49,38 @@ const textureLoader = new THREE.TextureLoader();
 const earthTexture = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg');
 const earthBumpMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg');
 const earthSpecularMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_specular_2048.jpg');
+const earthNightMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_lights_2048.png');
+const earthCloudsMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_clouds_2048.png');
 const satelliteTexture = textureLoader.load('AST Bluebird.png');
 
 // --- EARTH & ATMOSPHERE ---
 const earth = new THREE.Mesh(
     new THREE.SphereGeometry(EARTH_RADIUS, 128, 128),
-    new THREE.MeshPhongMaterial({ map: earthTexture, bumpMap: earthBumpMap, bumpScale: 50, specularMap: earthSpecularMap, specular: new THREE.Color('grey'), shininess: 10 })
+    new THREE.MeshPhongMaterial({ 
+        map: earthTexture, 
+        bumpMap: earthBumpMap, 
+        bumpScale: 100, 
+        specularMap: earthSpecularMap, 
+        specular: new THREE.Color(0x223344), // Cool blue specular
+        shininess: 15,
+        emissiveMap: earthNightMap,
+        emissive: new THREE.Color(0xaaccff), // Cool white-blue city lights
+        emissiveIntensity: 0.7
+    })
 );
 earth.rotation.y = Math.PI;
 scene.add(earth);
 
+const clouds = new THREE.Mesh(
+    new THREE.SphereGeometry(EARTH_RADIUS + 25, 128, 128),
+    new THREE.MeshLambertMaterial({ map: earthCloudsMap, transparent: true, opacity: 0.4, depthWrite: false })
+);
+clouds.rotation.y = Math.PI;
+scene.add(clouds);
+
 const atmosphere = new THREE.Mesh(
-    new THREE.SphereGeometry(EARTH_RADIUS * 1.015, 128, 128),
-    new THREE.MeshBasicMaterial({ color: 0x4477ff, transparent: true, opacity: 0.15, side: THREE.BackSide })
+    new THREE.SphereGeometry(EARTH_RADIUS * 1.025, 128, 128),
+    new THREE.MeshBasicMaterial({ color: 0x44aaff, transparent: true, opacity: 0.15, side: THREE.BackSide })
 );
 atmosphere.rotation.y = Math.PI;
 scene.add(atmosphere);
@@ -84,10 +103,9 @@ const latLonToXYZ = (lat, lon, radius) => {
 
 const midlandMarker = new THREE.Mesh(
     new THREE.SphereGeometry(120, 16, 16),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false })
+    new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: true })
 );
-midlandMarker.renderOrder = 1000;
-midlandMarker.position.copy(latLonToXYZ(31.9974, -102.0779, EARTH_RADIUS));
+midlandMarker.position.copy(latLonToXYZ(31.9974, -102.0779, EARTH_RADIUS + 10));
 midlandMarker.visible = false;
 earth.add(midlandMarker);
 
@@ -115,9 +133,9 @@ const createLatLine = (lat, color) => {
 const updateGuideLines = () => {
     while(guideLines.children.length > 0) guideLines.remove(guideLines.children[0]);
     const lat = config.inclination * (180 / Math.PI);
-    guideLines.add(createLatLine(lat, 0xff0000));  // Max North Inclination
-    guideLines.add(createLatLine(-lat, 0xff0000)); // Max South Inclination
-    guideLines.add(createLatLine(0, 0xffffff));    // Equator
+    guideLines.add(createLatLine(lat, 0xff0000));
+    guideLines.add(createLatLine(-lat, 0xff0000));
+    guideLines.add(createLatLine(0, 0xffffff));
 };
 
 // --- CONSTELLATION ---
@@ -148,21 +166,21 @@ const createConstellation = () => {
 
         for (let s = 0; s < currentPlaneSats; s++) {
             const satGroup = new THREE.Group();
-            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: satelliteTexture, color: 0xffcc00 }));
-            sprite.scale.set(250, 250, 1);
-            sprite.material.rotation = (Math.random() - 0.5) * 0.5;
-            satGroup.add(sprite);
+            const icon = new THREE.Mesh(
+                new THREE.PlaneGeometry(250, 250),
+                new THREE.MeshBasicMaterial({ map: satelliteTexture, color: 0xffcc00, transparent: true, side: THREE.DoubleSide, alphaTest: 0.1 })
+            );
+            satGroup.add(icon);
 
             const footprint = new THREE.Mesh(haloGeom, new THREE.MeshBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.08, side: THREE.FrontSide, depthWrite: false }));
             footprint.visible = false;
             footprintGroup.add(footprint);
 
             const meanAnomaly = ((s / currentPlaneSats) * Math.PI * 2) + planePhaseShift;
-            satellites.push({ mesh: satGroup, footprint, raan, meanAnomaly, orbitalRadius });
+            satellites.push({ mesh: satGroup, icon, footprint, raan, meanAnomaly, orbitalRadius });
             constellationGroup.add(satGroup);
         }
 
-        // Orbit path visual
         const curve = new THREE.EllipseCurve(0, 0, orbitalRadius, orbitalRadius, 0, 2 * Math.PI, false, 0);
         const orbitLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(120)), new THREE.LineBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.1 }));
         orbitLine.rotation.x = Math.PI / 2;
@@ -181,12 +199,8 @@ const updateSatellites = () => {
         const y_incl = zp * Math.sin(config.inclination);
         const z_incl = zp * Math.cos(config.inclination);
         const xp = sat.orbitalRadius * Math.cos(angle);
-        
-        sat.mesh.position.set(
-            xp * Math.cos(sat.raan) + z_incl * Math.sin(sat.raan),
-            y_incl,
-            -xp * Math.sin(sat.raan) + z_incl * Math.cos(sat.raan)
-        );
+        sat.mesh.position.set(xp * Math.cos(sat.raan) + z_incl * Math.sin(sat.raan), y_incl, -xp * Math.sin(sat.raan) + z_incl * Math.cos(sat.raan));
+        sat.icon.lookAt(0, 0, 0);
         sat.footprint.lookAt(sat.mesh.position);
     });
 };
@@ -205,17 +219,18 @@ for (let i = 0; i < MAX_ANTENNAS; i++) {
 
 const updateConnectivity = () => {
     beams.forEach(b => b.visible = false);
-    midlandMarker.getWorldPosition(_vec1); // GW world position
+    midlandMarker.getWorldPosition(_vec1);
     const groundNormal = _vec1.clone().normalize();
     const isGatewayActive = inputs.toggle.checked;
+    const isFOVActive = inputs.fov.checked;
 
     const candidates = [];
     satellites.forEach(sat => {
-        sat.mesh.getWorldPosition(_vec2); // Sat world position
+        sat.mesh.getWorldPosition(_vec2);
         const vecToSat = _vec2.clone().sub(_vec1).normalize();
         const elevation = Math.asin(Math.max(-1, Math.min(1, groundNormal.dot(vecToSat)))) * (180 / Math.PI);
         
-        sat.footprint.visible = true;
+        sat.footprint.visible = isFOVActive;
         sat.footprint.material.color.set(0x00ccff);
         sat.footprint.material.opacity = 0.08;
 
@@ -236,8 +251,10 @@ const updateConnectivity = () => {
 
     for (let i = 0; i < activeLinksCount; i++) {
         const link = candidates[i];
-        link.sat.footprint.material.color.set(0x00ff88);
-        link.sat.footprint.material.opacity = 0.25;
+        if (isFOVActive) {
+            link.sat.footprint.material.color.set(0x00ff88);
+            link.sat.footprint.material.opacity = 0.25;
+        }
         beams[i].visible = true;
         beams[i].geometry.setFromPoints([_vec1, link.worldPos]);
     }
@@ -260,9 +277,11 @@ const inputs = {
     inclination: document.getElementById('input-inclination'),
     total: document.getElementById('input-total'),
     planes: document.getElementById('input-planes'),
+    phasing: document.getElementById('input-phasing'),
     speed: document.getElementById('timeSpeed'),
     antennas: document.getElementById('input-antennas'),
     toggle: document.getElementById('gs-toggle'),
+    fov: document.getElementById('fov-toggle'),
     statusBox: document.getElementById('gs-status-box')
 };
 
@@ -271,7 +290,12 @@ const updateUI = () => {
     document.getElementById('val-inclination').innerText = inputs.inclination.value;
     document.getElementById('val-total').innerText = inputs.total.value;
     document.getElementById('val-planes').innerText = inputs.planes.value;
+    document.getElementById('val-phasing').innerText = inputs.phasing.value;
     document.getElementById('val-antennas').innerText = inputs.antennas.value;
+    
+    // Dynamic Header Info
+    document.getElementById('constellation-info').innerText = 
+        `Walker Delta: ${inputs.inclination.value}°: ${inputs.total.value}/${inputs.planes.value}/${inputs.phasing.value}`;
 };
 
 const syncConfig = () => {
@@ -279,12 +303,13 @@ const syncConfig = () => {
     config.inclination = parseInt(inputs.inclination.value) * (Math.PI / 180);
     config.totalSatellites = parseInt(inputs.total.value);
     config.planes = parseInt(inputs.planes.value);
+    config.phasing = parseInt(inputs.phasing.value);
     createConstellation(); updateUI(); updateGuideLines();
 };
 
 Object.values(inputs).forEach(input => {
     input.addEventListener('input', () => {
-        if (input.id === 'input-antennas') updateUI();
+        if (input.id === 'input-antennas' || input.id === 'fov-toggle') updateUI();
         else if (input.id !== 'timeSpeed' && input.id !== 'gs-toggle') syncConfig();
     });
 });
@@ -330,6 +355,7 @@ const animate = () => {
     }
     time += parseFloat(inputs.speed.value) / 1000;
     earth.rotation.y -= 0.0002;
+    clouds.rotation.y -= 0.0003;
     atmosphere.rotation.y -= 0.0002;
     updateSatellites(); updateConnectivity(); controls.update(); renderer.render(scene, camera);
 };
