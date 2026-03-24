@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
+// --- CONFIGURATION & CONSTANTS ---
 const EARTH_RADIUS = 6371; // km
+const FOOTPRINT_RADIUS = 900; // km
+const FOOTPRINT_OFFSET = 15; // km above surface
+const MAX_ANTENNAS = 4;
+
 let config = {
     altitude: 690,
     inclination: 53 * (Math.PI / 180),
@@ -11,12 +16,19 @@ let config = {
 };
 
 let time = 0;
-let timeSpeed = 0.01;
+let isAnimating = false;
+let targetCameraPos = new THREE.Vector3(0, 5000, EARTH_RADIUS + 8000);
 
+// Reusable vectors for performance
+const _vec1 = new THREE.Vector3();
+const _vec2 = new THREE.Vector3();
+const _mouse = new THREE.Vector2();
+const _raycaster = new THREE.Raycaster();
+
+// --- SCENE SETUP ---
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 10, 100000);
-// Initial view at 8,000km altitude
-camera.position.set(0, 5000, EARTH_RADIUS + 8000);
+camera.position.copy(targetCameraPos);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -24,86 +36,65 @@ document.body.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-
-// Stop camera animation on manual interaction
-controls.addEventListener('start', () => {
-    isAnimating = false;
-});
+controls.addEventListener('start', () => isAnimating = false);
 
 // Lighting
-const ambientLight = new THREE.AmbientLight(0x404040, 2); 
-scene.add(ambientLight);
+scene.add(new THREE.AmbientLight(0x404040, 2));
 const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
 sunLight.position.set(5000, 3000, 5000);
 scene.add(sunLight);
 
-// Texture Loader
+// --- TEXTURES & ASSETS ---
 const textureLoader = new THREE.TextureLoader();
 const earthTexture = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg');
 const earthBumpMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg');
 const earthSpecularMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_specular_2048.jpg');
+const satelliteTexture = textureLoader.load('AST Bluebird.png');
 
-// Earth
-const earthGeometry = new THREE.SphereGeometry(EARTH_RADIUS, 128, 128);
-const earthMaterial = new THREE.MeshPhongMaterial({
-    map: earthTexture,
-    bumpMap: earthBumpMap,
-    bumpScale: 50,
-    specularMap: earthSpecularMap,
-    specular: new THREE.Color('grey'),
-    shininess: 10
-});
-const earth = new THREE.Mesh(earthGeometry, earthMaterial);
+// --- EARTH & ATMOSPHERE ---
+const earth = new THREE.Mesh(
+    new THREE.SphereGeometry(EARTH_RADIUS, 128, 128),
+    new THREE.MeshPhongMaterial({ map: earthTexture, bumpMap: earthBumpMap, bumpScale: 50, specularMap: earthSpecularMap, specular: new THREE.Color('grey'), shininess: 10 })
+);
+earth.rotation.y = Math.PI;
 scene.add(earth);
 
+const atmosphere = new THREE.Mesh(
+    new THREE.SphereGeometry(EARTH_RADIUS * 1.015, 128, 128),
+    new THREE.MeshBasicMaterial({ color: 0x4477ff, transparent: true, opacity: 0.15, side: THREE.BackSide })
+);
+atmosphere.rotation.y = Math.PI;
+scene.add(atmosphere);
+
+scene.add(new THREE.Mesh(
+    new THREE.SphereGeometry(40000, 32, 32),
+    new THREE.MeshBasicMaterial({ map: textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/galaxy_starfield.png'), side: THREE.BackSide })
+));
+
+// --- GROUND STATION (GW) ---
 const latLonToXYZ = (lat, lon, radius) => {
     const phi = (90 - lat) * (Math.PI / 180);
     const theta = (lon + 180) * (Math.PI / 180);
-    const x = -(radius * Math.sin(phi) * Math.cos(theta));
-    const z = (radius * Math.sin(phi) * Math.sin(theta));
-    const y = (radius * Math.cos(phi));
-    return new THREE.Vector3(x, y, z);
+    return new THREE.Vector3(
+        -(radius * Math.sin(phi) * Math.cos(theta)),
+        radius * Math.cos(phi),
+        radius * Math.sin(phi) * Math.sin(theta)
+    );
 };
 
-// Static Ground Station (Midland, Texas) - Parented to Earth
 const midlandMarker = new THREE.Mesh(
-    new THREE.SphereGeometry(120, 16, 16), 
-    new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false }) // Pure white for high contrast
+    new THREE.SphereGeometry(120, 16, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false })
 );
 midlandMarker.renderOrder = 1000;
-const midlandPos = latLonToXYZ(31.9974, -102.0779, EARTH_RADIUS);
-midlandMarker.position.copy(midlandPos);
+midlandMarker.position.copy(latLonToXYZ(31.9974, -102.0779, EARTH_RADIUS));
 midlandMarker.visible = false;
 earth.add(midlandMarker);
 
-// Coverage Area around Midland (Light green subtle oval)
-const areaRadius = 1060; 
-const circleGeom = new THREE.CircleGeometry(areaRadius, 64);
-const circleMat = new THREE.MeshBasicMaterial({ color: 0x00ff88, side: THREE.DoubleSide, transparent: true, opacity: 0.3 });
-const coverageCircle = new THREE.Mesh(circleGeom, circleMat);
-coverageCircle.renderOrder = 900;
+// --- GUIDE LINES ---
+const guideLines = new THREE.Group();
+scene.add(guideLines);
 
-// Parent to Midland Marker, center it locally, and align to surface
-coverageCircle.position.set(0, 0, 0); 
-coverageCircle.lookAt(midlandPos.clone().multiplyScalar(2)); 
-midlandMarker.add(coverageCircle);
-
-// Atmosphere
-const atmosGeometry = new THREE.SphereGeometry(EARTH_RADIUS * 1.015, 128, 128);
-const atmosMaterial = new THREE.MeshBasicMaterial({ color: 0x4477ff, transparent: true, opacity: 0.15, side: THREE.BackSide });
-const atmosphere = new THREE.Mesh(atmosGeometry, atmosMaterial);
-scene.add(atmosphere);
-
-// Starfield
-const starGeometry = new THREE.SphereGeometry(40000, 32, 32); 
-const starMaterial = new THREE.MeshBasicMaterial({
-    map: textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/galaxy_starfield.png'),
-    side: THREE.BackSide
-});
-const stars = new THREE.Mesh(starGeometry, starMaterial);
-scene.add(stars);
-
-// Latitude Guide Lines
 const createLatLine = (lat, color) => {
     const rad = EARTH_RADIUS * 1.02;
     const y = rad * Math.sin(lat * Math.PI / 180);
@@ -113,115 +104,157 @@ const createLatLine = (lat, color) => {
         const theta = (i / 128) * Math.PI * 2;
         points.push(new THREE.Vector3(r * Math.cos(theta), y, r * Math.sin(theta)));
     }
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.LineDashedMaterial({ 
-        color: color, 
-        transparent: true, 
-        opacity: 0.35, 
-        dashSize: 200, 
-        gapSize: 100 
-    });
-    const line = new THREE.Line(geometry, material);
-    line.computeLineDistances(); 
+    const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(points),
+        new THREE.LineDashedMaterial({ color, transparent: true, opacity: 0.3, dashSize: 200, gapSize: 100 })
+    );
+    line.computeLineDistances();
     return line;
 };
-
-const guideLines = new THREE.Group();
-scene.add(guideLines);
 
 const updateGuideLines = () => {
     while(guideLines.children.length > 0) guideLines.remove(guideLines.children[0]);
     const lat = config.inclination * (180 / Math.PI);
-    guideLines.add(createLatLine(lat, 0xff0000));  // 53N
-    guideLines.add(createLatLine(-lat, 0xff0000)); // 53S
+    guideLines.add(createLatLine(lat, 0xff0000));  // Max North Inclination
+    guideLines.add(createLatLine(-lat, 0xff0000)); // Max South Inclination
     guideLines.add(createLatLine(0, 0xffffff));    // Equator
 };
-updateGuideLines();
 
-// Earth Orientation
-earth.rotation.y = Math.PI; 
-atmosphere.rotation.y = Math.PI;
-
-// Satellites
+// --- CONSTELLATION ---
 let satellites = [];
-let constellationGroup = new THREE.Group();
+const constellationGroup = new THREE.Group();
+const footprintGroup = new THREE.Group();
 scene.add(constellationGroup);
-
-const satGeometry = new THREE.SphereGeometry(60, 12, 12);
-const satMaterial = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
+earth.add(footprintGroup);
 
 const createConstellation = () => {
     while(constellationGroup.children.length > 0) constellationGroup.remove(constellationGroup.children[0]);
+    while(footprintGroup.children.length > 0) footprintGroup.remove(footprintGroup.children[0]);
     satellites = [];
+
     const orbitalRadius = EARTH_RADIUS + config.altitude;
-    
-    // Walker Delta Phasing: F * 360 / T
     const phaseOffsetPerPlane = (config.phasing * Math.PI * 2) / config.totalSatellites;
     const satsPerPlane = Math.floor(config.totalSatellites / config.planes);
     const remainder = config.totalSatellites % config.planes;
 
+    const angleRadius = FOOTPRINT_RADIUS / EARTH_RADIUS;
+    const haloGeom = new THREE.SphereGeometry(EARTH_RADIUS + FOOTPRINT_OFFSET, 32, 16, 0, Math.PI * 2, 0, angleRadius);
+    haloGeom.rotateX(Math.PI / 2);
+
     for (let p = 0; p < config.planes; p++) {
         const raan = (p / config.planes) * Math.PI * 2;
         const planePhaseShift = p * phaseOffsetPerPlane;
-        
-        // Handle distribution even if T is not perfectly divisible by P
         const currentPlaneSats = p < remainder ? satsPerPlane + 1 : satsPerPlane;
 
         for (let s = 0; s < currentPlaneSats; s++) {
-            const sat = new THREE.Mesh(satGeometry, satMaterial);
+            const satGroup = new THREE.Group();
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: satelliteTexture, color: 0xffcc00 }));
+            sprite.scale.set(250, 250, 1);
+            sprite.material.rotation = (Math.random() - 0.5) * 0.5;
+            satGroup.add(sprite);
+
+            const footprint = new THREE.Mesh(haloGeom, new THREE.MeshBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.08, side: THREE.FrontSide, depthWrite: false }));
+            footprint.visible = false;
+            footprintGroup.add(footprint);
+
             const meanAnomaly = ((s / currentPlaneSats) * Math.PI * 2) + planePhaseShift;
-            satellites.push({ mesh: sat, raan, meanAnomaly, orbitalRadius });
-            constellationGroup.add(sat);
+            satellites.push({ mesh: satGroup, footprint, raan, meanAnomaly, orbitalRadius });
+            constellationGroup.add(satGroup);
         }
 
+        // Orbit path visual
         const curve = new THREE.EllipseCurve(0, 0, orbitalRadius, orbitalRadius, 0, 2 * Math.PI, false, 0);
-        const pathLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(120)), new THREE.LineBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.1 }));
+        const orbitLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(120)), new THREE.LineBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.1 }));
+        orbitLine.rotation.x = Math.PI / 2;
         const orbitGroup = new THREE.Group();
-        pathLine.rotation.x = Math.PI / 2;
         orbitGroup.rotation.x = config.inclination;
         orbitGroup.rotation.y = raan;
-        orbitGroup.add(pathLine);
+        orbitGroup.add(orbitLine);
         constellationGroup.add(orbitGroup);
     }
 };
-createConstellation();
 
 const updateSatellites = () => {
     satellites.forEach((sat) => {
         const angle = sat.meanAnomaly + time;
-        const x_p = sat.orbitalRadius * Math.cos(angle);
-        const z_p = -sat.orbitalRadius * Math.sin(angle);
-        const y_incl = z_p * Math.sin(config.inclination);
-        const z_incl = z_p * Math.cos(config.inclination);
-        const finalX = x_p * Math.cos(sat.raan) + z_incl * Math.sin(sat.raan);
-        const finalY = y_incl;
-        const finalZ = -x_p * Math.sin(sat.raan) + z_incl * Math.cos(sat.raan);
-        sat.mesh.position.set(finalX, finalY, finalZ);
+        const zp = -sat.orbitalRadius * Math.sin(angle);
+        const y_incl = zp * Math.sin(config.inclination);
+        const z_incl = zp * Math.cos(config.inclination);
+        const xp = sat.orbitalRadius * Math.cos(angle);
+        
+        sat.mesh.position.set(
+            xp * Math.cos(sat.raan) + z_incl * Math.sin(sat.raan),
+            y_incl,
+            -xp * Math.sin(sat.raan) + z_incl * Math.cos(sat.raan)
+        );
+        sat.footprint.lookAt(sat.mesh.position);
     });
 };
 
-// Connectivity Beams (Multi-antenna pool) - BRIGHT NEON YELLOW
+// --- CONNECTIVITY & BEAMS ---
+const beams = [];
 const beamGroup = new THREE.Group();
 scene.add(beamGroup);
-const maxAntennaCount = 4;
-const beams = [];
-for (let i = 0; i < maxAntennaCount; i++) {
-    const beam = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
-        new THREE.LineBasicMaterial({ 
-            color: 0xffff00, // Bright neon yellow
-            transparent: true, 
-            opacity: 0.9, // High prominence
-            linewidth: 2, 
-            depthTest: true 
-        })
-    );
+
+for (let i = 0; i < MAX_ANTENNAS; i++) {
+    const beam = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.9, linewidth: 2, depthTest: true }));
     beam.visible = false;
     beams.push(beam);
     beamGroup.add(beam);
 }
 
-// UI Handling
+const updateConnectivity = () => {
+    beams.forEach(b => b.visible = false);
+    midlandMarker.getWorldPosition(_vec1); // GW world position
+    const groundNormal = _vec1.clone().normalize();
+    const isGatewayActive = inputs.toggle.checked;
+
+    const candidates = [];
+    satellites.forEach(sat => {
+        sat.mesh.getWorldPosition(_vec2); // Sat world position
+        const vecToSat = _vec2.clone().sub(_vec1).normalize();
+        const elevation = Math.asin(Math.max(-1, Math.min(1, groundNormal.dot(vecToSat)))) * (180 / Math.PI);
+        
+        sat.footprint.visible = true;
+        sat.footprint.material.color.set(0x00ccff);
+        sat.footprint.material.opacity = 0.08;
+
+        if (isGatewayActive && elevation >= 10) {
+            candidates.push({ sat, elevation, worldPos: _vec2.clone() });
+        }
+    });
+
+    if (!isGatewayActive) {
+        document.getElementById('conn-state').innerText = "GATEWAY OFF";
+        document.getElementById('conn-state').style.color = "#888";
+        document.getElementById('conn-elev').innerText = "---";
+        return;
+    }
+
+    candidates.sort((a, b) => b.elevation - a.elevation);
+    const activeLinksCount = Math.min(candidates.length, parseInt(inputs.antennas.value));
+
+    for (let i = 0; i < activeLinksCount; i++) {
+        const link = candidates[i];
+        link.sat.footprint.material.color.set(0x00ff88);
+        link.sat.footprint.material.opacity = 0.25;
+        beams[i].visible = true;
+        beams[i].geometry.setFromPoints([_vec1, link.worldPos]);
+    }
+
+    const stateEl = document.getElementById('conn-state');
+    if (activeLinksCount > 0) {
+        stateEl.innerText = `${activeLinksCount} ANTENNA${activeLinksCount > 1 ? 'S' : ''}`;
+        stateEl.style.color = "#00ff00";
+        document.getElementById('conn-elev').innerText = candidates[0].elevation.toFixed(1) + "°";
+    } else {
+        stateEl.innerText = "SEARCHING...";
+        stateEl.style.color = "#ffcc00";
+        document.getElementById('conn-elev').innerText = "---";
+    }
+};
+
+// --- UI & INTERACTION ---
 const inputs = {
     altitude: document.getElementById('input-altitude'),
     inclination: document.getElementById('input-inclination'),
@@ -233,128 +266,81 @@ const inputs = {
     statusBox: document.getElementById('gs-status-box')
 };
 
-const vals = {
-    altitude: document.getElementById('val-altitude'),
-    inclination: document.getElementById('val-inclination'),
-    total: document.getElementById('val-total'),
-    planes: document.getElementById('val-planes'),
-    antennas: document.getElementById('val-antennas')
+const updateUI = () => {
+    document.getElementById('val-altitude').innerText = inputs.altitude.value;
+    document.getElementById('val-inclination').innerText = inputs.inclination.value;
+    document.getElementById('val-total').innerText = inputs.total.value;
+    document.getElementById('val-planes').innerText = inputs.planes.value;
+    document.getElementById('val-antennas').innerText = inputs.antennas.value;
 };
 
-const updateConfig = () => {
+const syncConfig = () => {
     config.altitude = parseInt(inputs.altitude.value);
     config.inclination = parseInt(inputs.inclination.value) * (Math.PI / 180);
     config.totalSatellites = parseInt(inputs.total.value);
     config.planes = parseInt(inputs.planes.value);
-    vals.altitude.innerText = inputs.altitude.value;
-    vals.inclination.innerText = inputs.inclination.value;
-    vals.total.innerText = inputs.total.value;
-    vals.planes.innerText = inputs.planes.value;
-    vals.antennas.innerText = inputs.antennas.value;
-    createConstellation();
-    updateGuideLines();
+    createConstellation(); updateUI(); updateGuideLines();
 };
 
-Object.keys(inputs).forEach(key => {
-    const input = inputs[key];
-    if (key === 'toggle' || key === 'statusBox') return;
-    input.addEventListener('input', (e) => {
-        if (e.target.id === 'timeSpeed') {} 
-        else if (e.target.id === 'input-antennas') { vals.antennas.innerText = e.target.value; }
-        else { updateConfig(); }
+Object.values(inputs).forEach(input => {
+    input.addEventListener('input', () => {
+        if (input.id === 'input-antennas') updateUI();
+        else if (input.id !== 'timeSpeed' && input.id !== 'gs-toggle') syncConfig();
     });
 });
 
-// Camera Animation State
-let targetCameraPos = new THREE.Vector3(0, 5000, EARTH_RADIUS + 8000);
-let isAnimating = false;
-
 inputs.toggle.addEventListener('change', (e) => {
-    const active = e.target.checked;
-    midlandMarker.visible = active;
-    inputs.statusBox.style.display = active ? 'block' : 'none';
-    
-    if (active) {
-        const currentDist = camera.position.length();
-        const worldPos = new THREE.Vector3();
-        midlandMarker.getWorldPosition(worldPos);
-        const viewPos = worldPos.clone().normalize().multiplyScalar(currentDist);
-        targetCameraPos.copy(viewPos);
+    midlandMarker.visible = e.target.checked;
+    inputs.statusBox.style.display = e.target.checked ? 'block' : 'none';
+    if (e.target.checked) {
+        midlandMarker.getWorldPosition(_vec1);
+        targetCameraPos.copy(_vec1.normalize().multiplyScalar(camera.position.length()));
         isAnimating = true;
-    } else {
-        beams.forEach(b => b.visible = false);
     }
 });
 
-const updateConnectivity = () => {
-    beams.forEach(b => b.visible = false);
-    if (!inputs.toggle.checked) return;
-
-    const worldPos = new THREE.Vector3();
-    midlandMarker.getWorldPosition(worldPos);
-    const groundNormal = worldPos.clone().normalize();
-
-    const candidates = satellites.map(sat => {
-        const satPos = sat.mesh.position.clone();
-        const vecToSat = satPos.clone().sub(worldPos).normalize();
-        const elevation = Math.asin(Math.max(-1, Math.min(1, groundNormal.dot(vecToSat)))) * (180 / Math.PI);
-        return { mesh: sat.mesh, elevation };
-    }).filter(c => c.elevation >= 10);
-
-    candidates.sort((a, b) => b.elevation - a.elevation);
-
-    const antennaLimit = parseInt(inputs.antennas.value);
-    const activeLinks = Math.min(candidates.length, antennaLimit);
-
-    const maxScale = 1.0; 
-    const minScale = 0.5;
-    const t = (antennaLimit - 1) / 3;
-    const scaleFactor = minScale + (maxScale - minScale) * t;
-    
-    coverageCircle.scale.set(scaleFactor * 1.5, scaleFactor, 1);
-    coverageCircle.visible = inputs.toggle.checked && candidates.length > 0;
-
-    if (activeLinks > 0) {
-        for (let i = 0; i < activeLinks; i++) {
-            beams[i].visible = true;
-            beams[i].geometry.setFromPoints([worldPos, candidates[i].mesh.position]);
-        }
-        document.getElementById('conn-state').innerText = activeLinks + (activeLinks === 1 ? " ANTENNA" : " ANTENNAS");
-        document.getElementById('conn-state').style.color = "#00ff00";
-        document.getElementById('conn-elev').innerText = candidates[0].elevation.toFixed(1) + "°";
-    } else {
-        document.getElementById('conn-state').innerText = "SEARCHING...";
-        document.getElementById('conn-state').style.color = "#ffcc00";
-        document.getElementById('conn-elev').innerText = "---";
-    }
-};
-
-const animate = () => {
-    requestAnimationFrame(animate);
-    
-    if (isAnimating) {
-        const currentDist = camera.position.length();
-        camera.position.lerp(targetCameraPos, 0.02);
-        camera.position.normalize().multiplyScalar(currentDist);
-        if (camera.position.distanceTo(targetCameraPos) < 10) {
-            isAnimating = false;
+window.addEventListener('dblclick', (e) => {
+    if (e.target.closest('#ui')) return;
+    _mouse.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+    _raycaster.setFromCamera(_mouse, camera);
+    const intersects = _raycaster.intersectObject(earth);
+    if (intersects.length > 0) {
+        midlandMarker.position.copy(earth.worldToLocal(intersects[0].point.clone()));
+        if (inputs.toggle.checked) {
+            targetCameraPos.copy(intersects[0].point.normalize().multiplyScalar(camera.position.length()));
+            isAnimating = true;
         }
     }
-    
-    time += parseFloat(inputs.speed.value) / 1000;
-    earth.rotation.y -= 0.0002;
-    atmosphere.rotation.y -= 0.0002;
-    updateSatellites();
-    updateConnectivity();
-    controls.update();
-    renderer.render(scene, camera);
-};
+});
 
 document.getElementById('btn-reset').addEventListener('click', () => { 
-    const currentViewDir = camera.position.clone().normalize();
-    targetCameraPos.copy(currentViewDir.multiplyScalar(EARTH_RADIUS + 8000));
+    targetCameraPos.copy(camera.position.clone().normalize().multiplyScalar(EARTH_RADIUS + 8000));
     isAnimating = true;
     controls.target.set(0, 0, 0); 
 });
-window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+
+// --- MAIN LOOP ---
+const animate = () => {
+    requestAnimationFrame(animate);
+    if (isAnimating) {
+        const d = camera.position.length();
+        camera.position.lerp(targetCameraPos, 0.02);
+        camera.position.normalize().multiplyScalar(d);
+        if (camera.position.distanceTo(targetCameraPos) < 10) isAnimating = false;
+    }
+    time += parseFloat(inputs.speed.value) / 1000;
+    earth.rotation.y -= 0.0002;
+    atmosphere.rotation.y -= 0.0002;
+    updateSatellites(); updateConnectivity(); controls.update(); renderer.render(scene, camera);
+};
+
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+createConstellation();
+updateUI();
+updateGuideLines();
 animate();
