@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 // --- CONFIGURATION & CONSTANTS ---
 const EARTH_RADIUS = 6371; // km
-const FOOTPRINT_RADIUS = 900; // km
+const FOOTPRINT_RADIUS = 1600; // km
 const FOOTPRINT_OFFSET = 15; // km above surface
 const MAX_ANTENNAS = 4;
 
