@@ -243,50 +243,90 @@ const updateSatellites = () => {
 
 // --- CONNECTIVITY LOOP ---
 const updateConnectivity = () => {
-    gateways.forEach(gw => gw.beams.forEach(b => b.visible = false));
+    // 1. Reset all beams and visibility
+    gateways.forEach(gw => {
+        gw.beams.forEach(b => b.visible = false);
+        gw.activeAntennas = 0; // Reset counter for assignment
+    });
+
     const isGatewayActive = inputs.toggle.checked;
     const isFOVActive = inputs.fov.checked;
     const maxGWs = parseInt(inputs.gateways.value);
+    const antennaLimit = parseInt(inputs.antennas.value);
     const activeSatSats = new Set();
 
     if (isGatewayActive) {
-        gateways.forEach((gw, idx) => {
-            gw.marker.visible = idx < maxGWs;
-            if (!gw.marker.visible) return;
-            gw.marker.getWorldPosition(_vec1);
-            const groundNormal = _vec1.clone().normalize();
-            const candidates = [];
-            satellites.forEach(sat => {
-                sat.mesh.getWorldPosition(_vec2);
+        const activeGateways = gateways.slice(0, maxGWs);
+        activeGateways.forEach(gw => gw.marker.visible = true);
+
+        // 2. Collect the BEST possible gateway for every single satellite
+        const globalPotentialLinks = [];
+
+        satellites.forEach(sat => {
+            sat.mesh.getWorldPosition(_vec2); // Sat world pos
+
+            let bestElev = -999;
+            let bestGW = null;
+
+            activeGateways.forEach(gw => {
+                gw.marker.getWorldPosition(_vec1); // GW world pos
+                const groundNormal = _vec1.clone().normalize();
                 const vecToSat = _vec2.clone().sub(_vec1).normalize();
                 const elevation = Math.asin(Math.max(-1, Math.min(1, groundNormal.dot(vecToSat)))) * (180 / Math.PI);
-                if (elevation >= 10) candidates.push({ sat, elevation, worldPos: _vec2.clone() });
+
+                if (elevation >= 10 && elevation > bestElev) {
+                    bestElev = elevation;
+                    bestGW = gw;
+                }
             });
-            candidates.sort((a, b) => b.elevation - a.elevation);
-            const activeLinksCount = Math.min(candidates.length, parseInt(inputs.antennas.value));
-            for (let i = 0; i < activeLinksCount; i++) {
-                const link = candidates[i];
-                activeSatSats.add(link.sat);
-                gw.beams[i].visible = true;
-                gw.beams[i].geometry.setFromPoints([_vec1, link.worldPos]);
+
+            if (bestGW) {
+                globalPotentialLinks.push({
+                    sat: sat,
+                    gw: bestGW,
+                    elevation: bestElev,
+                    satWorldPos: _vec2.clone()
+                });
             }
-            if (gateways.length === 1) {
-                const stateEl = document.getElementById('conn-state');
-                if (activeLinksCount > 0) {
-                    stateEl.innerText = `${activeLinksCount} ANTENNA${activeLinksCount > 1 ? 'S' : ''}`;
-                    stateEl.style.color = "#00ff00";
-                    document.getElementById('conn-elev').innerText = candidates[0].elevation.toFixed(1) + "°";
-                } else {
-                    stateEl.innerText = "SEARCHING...";
-                    stateEl.style.color = "#ffcc00";
-                    document.getElementById('conn-elev').innerText = "---";
+        });
+
+        // 3. Sort ALL potential links by elevation (highest first)
+        globalPotentialLinks.sort((a, b) => b.elevation - a.elevation);
+
+        // 4. Assign links based on Priority + Gateway Capacity
+        globalPotentialLinks.forEach(link => {
+            if (link.gw.activeAntennas < antennaLimit) {
+                const gwIdx = activeGateways.indexOf(link.gw);
+                const beamIdx = link.gw.activeAntennas;
+
+                link.gw.beams[beamIdx].visible = true;
+                link.gw.marker.getWorldPosition(_vec1);
+                link.gw.beams[beamIdx].geometry.setFromPoints([_vec1, link.satWorldPos]);
+
+                activeSatSats.add(link.sat);
+                link.gw.activeAntennas++;
+
+                // Special Case: Update UI if only 1 Gateway is active
+                if (maxGWs === 1) {
+                    document.getElementById('conn-state').innerText = `${link.gw.activeAntennas} ANTENNA${link.gw.activeAntennas > 1 ? 'S' : ''}`;
+                    document.getElementById('conn-state').style.color = "#00ff00";
+                    document.getElementById('conn-elev').innerText = globalPotentialLinks[0].elevation.toFixed(1) + "°";
                 }
             }
         });
+
+        // Handle "Searching" state for single Gateway UI
+        if (maxGWs === 1 && activeGateways[0].activeAntennas === 0) {
+            document.getElementById('conn-state').innerText = "SEARCHING...";
+            document.getElementById('conn-state').style.color = "#ffcc00";
+            document.getElementById('conn-elev').innerText = "---";
+        }
+
     } else {
         gateways.forEach(gw => gw.marker.visible = false);
     }
 
+    // 5. Update Footprints
     satellites.forEach(sat => {
         sat.footprint.visible = isFOVActive;
         if (activeSatSats.has(sat)) {
@@ -297,7 +337,8 @@ const updateConnectivity = () => {
             sat.footprint.material.opacity = 0.08;
         }
     });
-    inputs.statusBox.style.display = (isGatewayActive && gateways.length === 1) ? 'block' : 'none';
+
+    inputs.statusBox.style.display = (isGatewayActive && maxGWs === 1) ? 'block' : 'none';
 };
 
 // --- UI & INTERACTION ---
