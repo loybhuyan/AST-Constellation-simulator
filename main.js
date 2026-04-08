@@ -132,7 +132,6 @@ const createGateway = (localPos) => {
         gwBeams.push(beam);
         gatewayBeamGroup.add(beam);
     }
-    
     return { marker, beams: gwBeams };
 };
 
@@ -156,10 +155,7 @@ const createLatLine = (lat, color) => {
         const theta = (i / 128) * Math.PI * 2;
         points.push(new THREE.Vector3(r * Math.cos(theta), y, r * Math.sin(theta)));
     }
-    const line = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(points),
-        new THREE.LineDashedMaterial({ color, transparent: true, opacity: 0.3, dashSize: 200, gapSize: 100 })
-    );
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), new THREE.LineDashedMaterial({ color, transparent: true, opacity: 0.3, dashSize: 200, gapSize: 100 }));
     line.computeLineDistances();
     return line;
 };
@@ -184,10 +180,7 @@ earth.add(footprintGroup);
 
 const createSatelliteObject = (haloGeom) => {
     const satGroup = new THREE.Group();
-    const icon = new THREE.Mesh(
-        new THREE.PlaneGeometry(250, 250),
-        new THREE.MeshBasicMaterial({ map: satelliteTexture, color: 0xffcc00, transparent: true, side: THREE.DoubleSide, alphaTest: 0.1 })
-    );
+    const icon = new THREE.Mesh(new THREE.PlaneGeometry(250, 250), new THREE.MeshBasicMaterial({ map: satelliteTexture, color: 0xffcc00, transparent: true, side: THREE.DoubleSide, alphaTest: 0.1 }));
     satGroup.add(icon);
     const footprint = new THREE.Mesh(haloGeom, new THREE.MeshBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.08, side: THREE.FrontSide, depthWrite: false }));
     return { mesh: satGroup, icon, footprint };
@@ -211,13 +204,8 @@ const createConstellation = () => {
     }
 
     while(orbitGroup.children.length > 0) orbitGroup.remove(orbitGroup.children[0]);
-    
     const oldGeom = satellitePool[0]?.footprint.geometry;
-    satellitePool.forEach(s => {
-        s.mesh.visible = false;
-        s.footprint.visible = false;
-        s.footprint.geometry = haloGeom;
-    });
+    satellitePool.forEach(s => { s.mesh.visible = false; s.footprint.visible = false; s.footprint.geometry = haloGeom; });
     if (oldGeom) oldGeom.dispose();
 
     satellites = [];
@@ -256,7 +244,6 @@ const updateSatellites = () => {
 // --- CONNECTIVITY LOOP ---
 const updateConnectivity = () => {
     gateways.forEach(gw => gw.beams.forEach(b => b.visible = false));
-    
     const isGatewayActive = inputs.toggle.checked;
     const isFOVActive = inputs.fov.checked;
     const maxGWs = parseInt(inputs.gateways.value);
@@ -266,30 +253,23 @@ const updateConnectivity = () => {
         gateways.forEach((gw, idx) => {
             gw.marker.visible = idx < maxGWs;
             if (!gw.marker.visible) return;
-
             gw.marker.getWorldPosition(_vec1);
             const groundNormal = _vec1.clone().normalize();
-            
             const candidates = [];
             satellites.forEach(sat => {
                 sat.mesh.getWorldPosition(_vec2);
                 const vecToSat = _vec2.clone().sub(_vec1).normalize();
                 const elevation = Math.asin(Math.max(-1, Math.min(1, groundNormal.dot(vecToSat)))) * (180 / Math.PI);
-                if (elevation >= 10) {
-                    candidates.push({ sat, elevation, worldPos: _vec2.clone() });
-                }
+                if (elevation >= 10) candidates.push({ sat, elevation, worldPos: _vec2.clone() });
             });
-
             candidates.sort((a, b) => b.elevation - a.elevation);
             const activeLinksCount = Math.min(candidates.length, parseInt(inputs.antennas.value));
-
             for (let i = 0; i < activeLinksCount; i++) {
                 const link = candidates[i];
                 activeSatSats.add(link.sat);
                 gw.beams[i].visible = true;
                 gw.beams[i].geometry.setFromPoints([_vec1, link.worldPos]);
             }
-            
             if (gateways.length === 1) {
                 const stateEl = document.getElementById('conn-state');
                 if (activeLinksCount > 0) {
@@ -317,7 +297,6 @@ const updateConnectivity = () => {
             sat.footprint.material.opacity = 0.08;
         }
     });
-
     inputs.statusBox.style.display = (isGatewayActive && gateways.length === 1) ? 'block' : 'none';
 };
 
@@ -344,15 +323,11 @@ const updateUI = () => {
     });
     const T = inputs.total.value;
     inputs.headerInfo.innerText = `Walker Delta: ${inputs.inclination.value}°: ${T}/${T}/${inputs.phasing.value}`;
-
     const maxGWs = parseInt(inputs.gateways.value);
     while (gateways.length > maxGWs) {
         const removed = gateways.pop();
         gatewayGroup.remove(removed.marker);
-        removed.beams.forEach(b => {
-            b.visible = false;
-            gatewayBeamGroup.remove(b);
-        });
+        removed.beams.forEach(b => { b.visible = false; gatewayBeamGroup.remove(b); });
     }
 };
 
@@ -360,7 +335,6 @@ const syncConfig = () => {
     config.altitude = parseInt(inputs.altitude.value);
     config.inclination = parseInt(inputs.inclination.value) * (Math.PI / 180);
     config.totalSatellites = parseInt(inputs.total.value);
-    config.planes = config.totalSatellites;
     config.phasing = parseInt(inputs.phasing.value);
     createConstellation(); updateUI(); updateGuideLines();
 };
@@ -408,7 +382,7 @@ window.addEventListener('dblclick', (e) => {
         }
     }
 });
-// --- MAIN LOOP ---
+
 const animate = () => {
     requestAnimationFrame(animate);
     if (isAnimating) {
