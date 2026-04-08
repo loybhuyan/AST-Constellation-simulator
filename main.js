@@ -6,12 +6,13 @@ const EARTH_RADIUS = 6371; // km
 const FOOTPRINT_RADIUS = 1600; // km
 const FOOTPRINT_OFFSET = 15; // km above surface
 const MAX_ANTENNAS = 4;
+const MAX_CAPACITY = 96; // Fixed grid slots
 
 let config = {
     altitude: 690,
     inclination: 53 * (Math.PI / 180),
     totalSatellites: 96,
-    planes: 96,
+    planes: 96, 
     phasing: 56
 };
 
@@ -19,9 +20,10 @@ let time = 0;
 let isAnimating = false;
 let targetCameraPos = new THREE.Vector3(0, 5000, EARTH_RADIUS + 8000);
 
-// Reusable vectors for performance
+// Reusable objects for performance
 const _vec1 = new THREE.Vector3();
 const _vec2 = new THREE.Vector3();
+const _vec3 = new THREE.Vector3();
 const _mouse = new THREE.Vector2();
 const _raycaster = new THREE.Raycaster();
 
@@ -31,6 +33,7 @@ const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerH
 camera.position.copy(targetCameraPos);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
@@ -38,7 +41,6 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.addEventListener('start', () => isAnimating = false);
 
-// Lighting
 scene.add(new THREE.AmbientLight(0x404040, 2));
 const sunLight = new THREE.DirectionalLight(0xf0f8ff, 1.5);
 sunLight.position.set(5000, 3000, 5000);
@@ -61,10 +63,10 @@ const earth = new THREE.Mesh(
         bumpMap: earthBumpMap, 
         bumpScale: 100, 
         specularMap: earthSpecularMap, 
-        specular: new THREE.Color(0x223344), // Cool blue specular
+        specular: new THREE.Color(0x223344),
         shininess: 15,
         emissiveMap: earthNightMap,
-        emissive: new THREE.Color(0xaaccff), // Cool white-blue city lights
+        emissive: new THREE.Color(0xaaccff),
         emissiveIntensity: 0.7
     })
 );
@@ -73,7 +75,13 @@ scene.add(earth);
 
 const clouds = new THREE.Mesh(
     new THREE.SphereGeometry(EARTH_RADIUS + 25, 128, 128),
-    new THREE.MeshLambertMaterial({ map: earthCloudsMap, transparent: true, opacity: 0.4, depthWrite: false })
+    new THREE.MeshLambertMaterial({ 
+        map: earthCloudsMap, 
+        transparent: true, 
+        opacity: 0.4, 
+        depthWrite: false,
+        alphaTest: 0.01
+    })
 );
 clouds.rotation.y = Math.PI;
 scene.add(clouds);
@@ -90,7 +98,7 @@ scene.add(new THREE.Mesh(
     new THREE.MeshBasicMaterial({ map: textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/galaxy_starfield.png'), side: THREE.BackSide })
 ));
 
-// --- GROUND STATION (GW) ---
+// --- GROUND STATIONS (GWs) ---
 const latLonToXYZ = (lat, lon, radius) => {
     const phi = (90 - lat) * (Math.PI / 180);
     const theta = (lon + 180) * (Math.PI / 180);
@@ -101,13 +109,39 @@ const latLonToXYZ = (lat, lon, radius) => {
     );
 };
 
-const midlandMarker = new THREE.Mesh(
-    new THREE.SphereGeometry(120, 16, 16),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: true })
-);
-midlandMarker.position.copy(latLonToXYZ(31.9974, -102.0779, EARTH_RADIUS + 10));
-midlandMarker.visible = false;
-earth.add(midlandMarker);
+let gateways = [];
+const gatewayGroup = new THREE.Group();
+const gatewayBeamGroup = new THREE.Group();
+earth.add(gatewayGroup);
+scene.add(gatewayBeamGroup);
+
+const createGateway = (localPos) => {
+    const marker = new THREE.Mesh(
+        new THREE.SphereGeometry(120, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: true })
+    );
+    marker.position.copy(localPos);
+    
+    const gwBeams = [];
+    for (let i = 0; i < MAX_ANTENNAS; i++) {
+        const beam = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+            new THREE.LineBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.9, linewidth: 2, depthTest: true })
+        );
+        beam.visible = false;
+        gwBeams.push(beam);
+        gatewayBeamGroup.add(beam);
+    }
+    
+    return { marker, beams: gwBeams };
+};
+
+// Initial Gateway
+const midlandPos = latLonToXYZ(31.9974, -102.0779, EARTH_RADIUS);
+const firstGW = createGateway(midlandPos);
+firstGW.marker.visible = false;
+gateways.push(firstGW);
+gatewayGroup.add(firstGW.marker);
 
 // --- GUIDE LINES ---
 const guideLines = new THREE.Group();
@@ -140,55 +174,69 @@ const updateGuideLines = () => {
 
 // --- CONSTELLATION ---
 let satellites = [];
+const satellitePool = []; 
 const constellationGroup = new THREE.Group();
 const footprintGroup = new THREE.Group();
+const orbitGroup = new THREE.Group();
 scene.add(constellationGroup);
+scene.add(orbitGroup);
 earth.add(footprintGroup);
 
-const createConstellation = () => {
-    while(constellationGroup.children.length > 0) constellationGroup.remove(constellationGroup.children[0]);
-    while(footprintGroup.children.length > 0) footprintGroup.remove(footprintGroup.children[0]);
-    satellites = [];
+const createSatelliteObject = (haloGeom) => {
+    const satGroup = new THREE.Group();
+    const icon = new THREE.Mesh(
+        new THREE.PlaneGeometry(250, 250),
+        new THREE.MeshBasicMaterial({ map: satelliteTexture, color: 0xffcc00, transparent: true, side: THREE.DoubleSide, alphaTest: 0.1 })
+    );
+    satGroup.add(icon);
+    const footprint = new THREE.Mesh(haloGeom, new THREE.MeshBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.08, side: THREE.FrontSide, depthWrite: false }));
+    return { mesh: satGroup, icon, footprint };
+};
 
+const createConstellation = () => {
     const orbitalRadius = EARTH_RADIUS + config.altitude;
-    const phaseOffsetPerPlane = (config.phasing * Math.PI * 2) / config.totalSatellites;
-    const satsPerPlane = Math.floor(config.totalSatellites / config.planes);
-    const remainder = config.totalSatellites % config.planes;
+    const F = config.phasing;
 
     const angleRadius = FOOTPRINT_RADIUS / EARTH_RADIUS;
     const haloGeom = new THREE.SphereGeometry(EARTH_RADIUS + FOOTPRINT_OFFSET, 32, 16, 0, Math.PI * 2, 0, angleRadius);
     haloGeom.rotateX(Math.PI / 2);
 
-    for (let p = 0; p < config.planes; p++) {
-        const raan = (p / config.planes) * Math.PI * 2;
-        const planePhaseShift = p * phaseOffsetPerPlane;
-        const currentPlaneSats = p < remainder ? satsPerPlane + 1 : satsPerPlane;
-
-        for (let s = 0; s < currentPlaneSats; s++) {
-            const satGroup = new THREE.Group();
-            const icon = new THREE.Mesh(
-                new THREE.PlaneGeometry(250, 250),
-                new THREE.MeshBasicMaterial({ map: satelliteTexture, color: 0xffcc00, transparent: true, side: THREE.DoubleSide, alphaTest: 0.1 })
-            );
-            satGroup.add(icon);
-
-            const footprint = new THREE.Mesh(haloGeom, new THREE.MeshBasicMaterial({ color: 0x00ccff, transparent: true, opacity: 0.08, side: THREE.FrontSide, depthWrite: false }));
-            footprint.visible = false;
-            footprintGroup.add(footprint);
-
-            const meanAnomaly = ((s / currentPlaneSats) * Math.PI * 2) + planePhaseShift;
-            satellites.push({ mesh: satGroup, icon, footprint, raan, meanAnomaly, orbitalRadius });
-            constellationGroup.add(satGroup);
+    if (satellitePool.length === 0) {
+        for (let i = 0; i < MAX_CAPACITY; i++) {
+            const newSat = createSatelliteObject(haloGeom);
+            satellitePool.push(newSat);
+            constellationGroup.add(newSat.mesh);
+            footprintGroup.add(newSat.footprint);
         }
+    }
+
+    while(orbitGroup.children.length > 0) orbitGroup.remove(orbitGroup.children[0]);
+    
+    const oldGeom = satellitePool[0]?.footprint.geometry;
+    satellitePool.forEach(s => {
+        s.mesh.visible = false;
+        s.footprint.visible = false;
+        s.footprint.geometry = haloGeom;
+    });
+    if (oldGeom) oldGeom.dispose();
+
+    satellites = [];
+    for (let n = 0; n < config.totalSatellites; n++) {
+        const sat = satellitePool[n];
+        sat.mesh.visible = true;
+        sat.footprint.visible = inputs.fov.checked;
+        const raan = (n / MAX_CAPACITY) * Math.PI * 2;
+        const meanAnomaly = (n * F * Math.PI * 2) / MAX_CAPACITY;
+        satellites.push({ mesh: sat.mesh, icon: sat.icon, footprint: sat.footprint, raan, meanAnomaly, orbitalRadius });
 
         const curve = new THREE.EllipseCurve(0, 0, orbitalRadius, orbitalRadius, 0, 2 * Math.PI, false, 0);
         const orbitLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(120)), new THREE.LineBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.1 }));
         orbitLine.rotation.x = Math.PI / 2;
-        const orbitGroup = new THREE.Group();
-        orbitGroup.rotation.x = config.inclination;
-        orbitGroup.rotation.y = raan;
-        orbitGroup.add(orbitLine);
-        constellationGroup.add(orbitGroup);
+        const planeGroup = new THREE.Group();
+        planeGroup.rotation.x = config.inclination;
+        planeGroup.rotation.y = raan;
+        planeGroup.add(orbitLine);
+        orbitGroup.add(planeGroup);
     }
 };
 
@@ -205,70 +253,72 @@ const updateSatellites = () => {
     });
 };
 
-// --- CONNECTIVITY & BEAMS ---
-const beams = [];
-const beamGroup = new THREE.Group();
-scene.add(beamGroup);
-
-for (let i = 0; i < MAX_ANTENNAS; i++) {
-    const beam = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.9, linewidth: 2, depthTest: true }));
-    beam.visible = false;
-    beams.push(beam);
-    beamGroup.add(beam);
-}
-
+// --- CONNECTIVITY LOOP ---
 const updateConnectivity = () => {
-    beams.forEach(b => b.visible = false);
-    midlandMarker.getWorldPosition(_vec1);
-    const groundNormal = _vec1.clone().normalize();
+    gateways.forEach(gw => gw.beams.forEach(b => b.visible = false));
+    
     const isGatewayActive = inputs.toggle.checked;
     const isFOVActive = inputs.fov.checked;
+    const maxGWs = parseInt(inputs.gateways.value);
+    const activeSatSats = new Set();
 
-    const candidates = [];
+    if (isGatewayActive) {
+        gateways.forEach((gw, idx) => {
+            gw.marker.visible = idx < maxGWs;
+            if (!gw.marker.visible) return;
+
+            gw.marker.getWorldPosition(_vec1);
+            const groundNormal = _vec1.clone().normalize();
+            
+            const candidates = [];
+            satellites.forEach(sat => {
+                sat.mesh.getWorldPosition(_vec2);
+                const vecToSat = _vec2.clone().sub(_vec1).normalize();
+                const elevation = Math.asin(Math.max(-1, Math.min(1, groundNormal.dot(vecToSat)))) * (180 / Math.PI);
+                if (elevation >= 10) {
+                    candidates.push({ sat, elevation, worldPos: _vec2.clone() });
+                }
+            });
+
+            candidates.sort((a, b) => b.elevation - a.elevation);
+            const activeLinksCount = Math.min(candidates.length, parseInt(inputs.antennas.value));
+
+            for (let i = 0; i < activeLinksCount; i++) {
+                const link = candidates[i];
+                activeSatSats.add(link.sat);
+                gw.beams[i].visible = true;
+                gw.beams[i].geometry.setFromPoints([_vec1, link.worldPos]);
+            }
+            
+            if (gateways.length === 1) {
+                const stateEl = document.getElementById('conn-state');
+                if (activeLinksCount > 0) {
+                    stateEl.innerText = `${activeLinksCount} ANTENNA${activeLinksCount > 1 ? 'S' : ''}`;
+                    stateEl.style.color = "#00ff00";
+                    document.getElementById('conn-elev').innerText = candidates[0].elevation.toFixed(1) + "°";
+                } else {
+                    stateEl.innerText = "SEARCHING...";
+                    stateEl.style.color = "#ffcc00";
+                    document.getElementById('conn-elev').innerText = "---";
+                }
+            }
+        });
+    } else {
+        gateways.forEach(gw => gw.marker.visible = false);
+    }
+
     satellites.forEach(sat => {
-        sat.mesh.getWorldPosition(_vec2);
-        const vecToSat = _vec2.clone().sub(_vec1).normalize();
-        const elevation = Math.asin(Math.max(-1, Math.min(1, groundNormal.dot(vecToSat)))) * (180 / Math.PI);
-        
         sat.footprint.visible = isFOVActive;
-        sat.footprint.material.color.set(0x00ccff);
-        sat.footprint.material.opacity = 0.08;
-
-        if (isGatewayActive && elevation >= 10) {
-            candidates.push({ sat, elevation, worldPos: _vec2.clone() });
+        if (activeSatSats.has(sat)) {
+            sat.footprint.material.color.set(0x00ff88);
+            sat.footprint.material.opacity = 0.25;
+        } else {
+            sat.footprint.material.color.set(0x00ccff);
+            sat.footprint.material.opacity = 0.08;
         }
     });
 
-    if (!isGatewayActive) {
-        document.getElementById('conn-state').innerText = "GATEWAY OFF";
-        document.getElementById('conn-state').style.color = "#888";
-        document.getElementById('conn-elev').innerText = "---";
-        return;
-    }
-
-    candidates.sort((a, b) => b.elevation - a.elevation);
-    const activeLinksCount = Math.min(candidates.length, parseInt(inputs.antennas.value));
-
-    for (let i = 0; i < activeLinksCount; i++) {
-        const link = candidates[i];
-        if (isFOVActive) {
-            link.sat.footprint.material.color.set(0x00ff88);
-            link.sat.footprint.material.opacity = 0.25;
-        }
-        beams[i].visible = true;
-        beams[i].geometry.setFromPoints([_vec1, link.worldPos]);
-    }
-
-    const stateEl = document.getElementById('conn-state');
-    if (activeLinksCount > 0) {
-        stateEl.innerText = `${activeLinksCount} ANTENNA${activeLinksCount > 1 ? 'S' : ''}`;
-        stateEl.style.color = "#00ff00";
-        document.getElementById('conn-elev').innerText = candidates[0].elevation.toFixed(1) + "°";
-    } else {
-        stateEl.innerText = "SEARCHING...";
-        stateEl.style.color = "#ffcc00";
-        document.getElementById('conn-elev').innerText = "---";
-    }
+    inputs.statusBox.style.display = (isGatewayActive && gateways.length === 1) ? 'block' : 'none';
 };
 
 // --- UI & INTERACTION ---
@@ -276,74 +326,88 @@ const inputs = {
     altitude: document.getElementById('input-altitude'),
     inclination: document.getElementById('input-inclination'),
     total: document.getElementById('input-total'),
-    planes: document.getElementById('input-planes'),
     phasing: document.getElementById('input-phasing'),
+    gateways: document.getElementById('input-gateways'),
     speed: document.getElementById('timeSpeed'),
     antennas: document.getElementById('input-antennas'),
     toggle: document.getElementById('gs-toggle'),
     fov: document.getElementById('fov-toggle'),
-    statusBox: document.getElementById('gs-status-box')
+    statusBox: document.getElementById('gs-status-box'),
+    headerInfo: document.getElementById('constellation-info')
 };
 
 const updateUI = () => {
-    document.getElementById('val-altitude').innerText = inputs.altitude.value;
-    document.getElementById('val-inclination').innerText = inputs.inclination.value;
-    document.getElementById('val-total').innerText = inputs.total.value;
-    document.getElementById('val-planes').innerText = inputs.planes.value;
-    document.getElementById('val-phasing').innerText = inputs.phasing.value;
-    document.getElementById('val-antennas').innerText = inputs.antennas.value;
-    
-    // Dynamic Header Info
-    document.getElementById('constellation-info').innerText = 
-        `Walker Delta: ${inputs.inclination.value}°: ${inputs.total.value}/${inputs.planes.value}/${inputs.phasing.value}`;
+    const values = ['altitude', 'inclination', 'total', 'phasing', 'antennas', 'gateways'];
+    values.forEach(key => {
+        const el = document.getElementById(`val-${key}`);
+        if (el) el.innerText = inputs[key].value;
+    });
+    const T = inputs.total.value;
+    inputs.headerInfo.innerText = `Walker Delta: ${inputs.inclination.value}°: ${T}/${T}/${inputs.phasing.value}`;
+
+    const maxGWs = parseInt(inputs.gateways.value);
+    while (gateways.length > maxGWs) {
+        const removed = gateways.pop();
+        gatewayGroup.remove(removed.marker);
+        removed.beams.forEach(b => {
+            b.visible = false;
+            gatewayBeamGroup.remove(b);
+        });
+    }
 };
 
 const syncConfig = () => {
     config.altitude = parseInt(inputs.altitude.value);
     config.inclination = parseInt(inputs.inclination.value) * (Math.PI / 180);
     config.totalSatellites = parseInt(inputs.total.value);
-    config.planes = parseInt(inputs.planes.value);
+    config.planes = config.totalSatellites;
     config.phasing = parseInt(inputs.phasing.value);
     createConstellation(); updateUI(); updateGuideLines();
 };
 
 Object.values(inputs).forEach(input => {
+    if (!input || input.id === 'gs-status-box' || input.id === 'constellation-info') return;
     input.addEventListener('input', () => {
-        if (input.id === 'input-antennas' || input.id === 'fov-toggle') updateUI();
-        else if (input.id !== 'timeSpeed' && input.id !== 'gs-toggle') syncConfig();
+        const isConfig = !['input-antennas', 'fov-toggle', 'timeSpeed', 'gs-toggle', 'input-gateways'].includes(input.id);
+        if (isConfig) syncConfig();
+        else updateUI();
     });
 });
 
 inputs.toggle.addEventListener('change', (e) => {
-    midlandMarker.visible = e.target.checked;
-    inputs.statusBox.style.display = e.target.checked ? 'block' : 'none';
-    if (e.target.checked) {
-        midlandMarker.getWorldPosition(_vec1);
-        targetCameraPos.copy(_vec1.normalize().multiplyScalar(camera.position.length()));
+    updateConnectivity();
+    if (e.target.checked && gateways.length > 0) {
+        gateways[gateways.length - 1].marker.getWorldPosition(_vec3);
+        targetCameraPos.copy(_vec3.normalize().multiplyScalar(camera.position.length()));
         isAnimating = true;
     }
 });
 
 window.addEventListener('dblclick', (e) => {
     if (e.target.closest('#ui')) return;
-    _mouse.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+    const rect = renderer.domElement.getBoundingClientRect();
+    _mouse.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     _raycaster.setFromCamera(_mouse, camera);
     const intersects = _raycaster.intersectObject(earth);
     if (intersects.length > 0) {
-        midlandMarker.position.copy(earth.worldToLocal(intersects[0].point.clone()));
+        earth.updateMatrixWorld();
+        const localPoint = earth.worldToLocal(intersects[0].point.clone());
+        const maxGWs = parseInt(inputs.gateways.value);
+        if (gateways.length < maxGWs) {
+            const newGW = createGateway(localPoint);
+            gateways.push(newGW);
+            gatewayGroup.add(newGW.marker);
+        } else {
+            const oldest = gateways.shift();
+            oldest.marker.position.copy(localPoint);
+            gateways.push(oldest);
+        }
         if (inputs.toggle.checked) {
             targetCameraPos.copy(intersects[0].point.normalize().multiplyScalar(camera.position.length()));
             isAnimating = true;
         }
     }
 });
-
-document.getElementById('btn-reset').addEventListener('click', () => { 
-    targetCameraPos.copy(camera.position.clone().normalize().multiplyScalar(EARTH_RADIUS + 8000));
-    isAnimating = true;
-    controls.target.set(0, 0, 0); 
-});
-
 // --- MAIN LOOP ---
 const animate = () => {
     requestAnimationFrame(animate);
@@ -353,10 +417,13 @@ const animate = () => {
         camera.position.normalize().multiplyScalar(d);
         if (camera.position.distanceTo(targetCameraPos) < 10) isAnimating = false;
     }
-    time += parseFloat(inputs.speed.value) / 1000;
-    earth.rotation.y -= 0.0002;
-    clouds.rotation.y -= 0.0003;
-    atmosphere.rotation.y -= 0.0002;
+    const currentSpeed = parseFloat(inputs.speed.value);
+    if (currentSpeed > 0) {
+        time += currentSpeed / 1000;
+        earth.rotation.y -= 0.0002;
+        clouds.rotation.y -= 0.0003;
+        atmosphere.rotation.y -= 0.0002;
+    }
     updateSatellites(); updateConnectivity(); controls.update(); renderer.render(scene, camera);
 };
 

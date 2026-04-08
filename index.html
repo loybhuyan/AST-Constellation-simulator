@@ -35,17 +35,17 @@
 
         <div class="control-group">
             <label>Total Satellites (T): <span id="val-total">96</span></label>
-            <input type="range" id="input-total" min="1" max="192" value="96">
-        </div>
-
-        <div class="control-group">
-            <label>Orbital Planes (P): <span id="val-planes">96</span></label>
-            <input type="range" id="input-planes" min="1" max="192" value="96">
+            <input type="range" id="input-total" min="1" max="96" value="96">
         </div>
 
         <div class="control-group">
             <label>Phasing (F): <span id="val-phasing">56</span></label>
-            <input type="range" id="input-phasing" min="0" max="100" value="56">
+            <input type="range" id="input-phasing" min="0" max="95" value="56">
+        </div>
+
+        <div class="control-group">
+            <label>Max Gateways: <span id="val-gateways">1</span></label>
+            <input type="range" id="input-gateways" min="1" max="4" value="1">
         </div>
 
         <hr>
@@ -71,9 +71,9 @@
                 Double Click at any point to place Gateway
             </div>
             <div id="gs-status-box" style="display: none; margin-top: 15px; padding: 10px; background: rgba(0, 255, 204, 0.1); border-radius: 6px; border: 1px solid rgba(0, 255, 204, 0.2); text-align: center;">
-                <div style="font-size: 0.7rem; color: #888; text-transform: uppercase;">Connected Antennas</div>
+                <div style="font-size: 0.7rem; color: #888; text-transform: uppercase;">Gateway Link Status</div>
                 <div id="conn-state" style="font-size: 1rem; font-weight: bold; margin: 5px 0; color: #00ff00;">CONNECTED</div>
-                <div style="font-size: 0.7rem; color: #888;">Gateway Status: <span id="conn-elev" style="color: #fff; font-weight: bold;">---</span></div>
+                <div style="font-size: 0.7rem; color: #888;">Max Elevation: <span id="conn-elev" style="color: #fff; font-weight: bold;">---</span></div>
             </div>
         </div>
 
@@ -89,8 +89,6 @@
             <label>Time Speed</label>
             <input type="range" id="timeSpeed" min="0" max="40" value="10">
         </div>
-
-        <button id="btn-reset">Reset View</button>
     </div>
 
     <script type="module" src="main.js"></script>
