@@ -249,9 +249,9 @@ const hexFragmentShader = `
         float d = hexDist(g);
         float edge = smoothstep(0.42, 0.46, d);
         
-        // Match 0xffcc00 (approx vec3(1.0, 0.8, 0.0))
-        vec3 activeColor = vec3(1.0, 0.8, 0.0);
-        vec3 inactiveColor = vec3(0.2, 0.15, 0.0);
+        // Match #00ffcc (approx vec3(0.0, 1.0, 0.8))
+        vec3 activeColor = vec3(0.0, 1.0, 0.8);
+        vec3 inactiveColor = vec3(0.0, 0.2, 0.16);
         
         vec3 color = mix(inactiveColor, activeColor, coverage);
         float alpha = edge * (0.15 + coverage * 0.85) + (coverage * 0.2);
