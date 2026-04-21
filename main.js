@@ -231,8 +231,12 @@ const hexFragmentShader = `
         
         vec3 localNorm = normalize(vPosition);
         float lat = asin(localNorm.y);
-        float lon = atan(localNorm.z, localNorm.x);
-        float scale = 132.7; 
+        float lon = atan(localNorm.x, localNorm.z); // Using x,z for better wrap
+        
+        // Scale for ~100km diameter
+        // Circumference 40030km / 100km approx 400 hexes
+        // 400 / 2pi approx 63.6
+        float scale = 63.6; 
         vec2 p = vec2(lon * scale, lat * scale);
         
         // Transform to hex grid
@@ -245,7 +249,11 @@ const hexFragmentShader = `
         float d = hexDist(g);
         float edge = smoothstep(0.42, 0.46, d);
         
-        vec3 color = mix(vec3(0.05, 0.15, 0.3), vec3(0.0, 1.0, 0.533), coverage);
+        // Match 0xffcc00 (approx vec3(1.0, 0.8, 0.0))
+        vec3 activeColor = vec3(1.0, 0.8, 0.0);
+        vec3 inactiveColor = vec3(0.2, 0.15, 0.0);
+        
+        vec3 color = mix(inactiveColor, activeColor, coverage);
         float alpha = edge * (0.15 + coverage * 0.85) + (coverage * 0.2);
         if (alpha < 0.01) discard;
         gl_FragColor = vec4(color, alpha);
@@ -414,7 +422,7 @@ const updateConnectivity = () => {
     satellites.forEach(sat => {
         sat.footprint.visible = isFOVActive;
         if (activeSatSats.has(sat)) {
-            sat.footprint.material.color.set(0x00ff88);
+            sat.footprint.material.color.set(0x88ffcc);
             sat.footprint.material.opacity = 0.25;
         } else {
             sat.footprint.material.color.set(0x00ccff);
