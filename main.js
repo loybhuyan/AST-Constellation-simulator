@@ -173,6 +173,105 @@ const updateGuideLines = () => {
     guideLines.add(createLatLine(0, 0xffffff));
 };
 
+// --- HEX GRID LAYER ---
+const hexVertexShader = `
+    varying vec3 vPosition;
+    varying vec3 vWorldPosition;
+    void main() {
+        vPosition = position;
+        vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+
+const hexFragmentShader = `
+    varying vec3 vPosition;
+    varying vec3 vWorldPosition;
+    uniform vec3 activeSatPos[64];
+    uniform int intActiveCount;
+
+    vec2 rectToHex(vec2 p) {
+        float q = (sqrt(3.0)/3.0 * p.x - 1.0/3.0 * p.y);
+        float r = (2.0/3.0 * p.y);
+        return vec2(q, r);
+    }
+
+    vec2 hexRound(vec2 hex) {
+        float x = hex.x;
+        float y = hex.y;
+        float z = -x - y;
+        float rx = floor(x + 0.5);
+        float ry = floor(y + 0.5);
+        float rz = floor(z + 0.5);
+        float dx = abs(rx - x);
+        float dy = abs(ry - y);
+        float dz = abs(rz - z);
+        if (dx > dy && dx > dz) rx = -ry - rz;
+        else if (dy > dz) ry = -rx - rz;
+        return vec2(rx, ry);
+    }
+
+    // True Hexagonal Distance Function
+    float hexDist(vec2 p) {
+        p = abs(p);
+        float d = dot(p, normalize(vec2(1.0, 1.732)));
+        return max(d, p.x);
+    }
+
+    void main() {
+        vec3 worldNorm = normalize(vWorldPosition);
+        float coverage = 0.0;
+        for(int i = 0; i < 64; i++) {
+            if (i >= intActiveCount) break;
+            if (dot(worldNorm, activeSatPos[i]) > 0.968) {
+                coverage = 1.0;
+                break;
+            }
+        }
+        
+        vec3 localNorm = normalize(vPosition);
+        float lat = asin(localNorm.y);
+        float lon = atan(localNorm.z, localNorm.x);
+        float scale = 132.7; 
+        vec2 p = vec2(lon * scale, lat * scale);
+        
+        // Transform to hex grid
+        vec2 r = vec2(1.0, 1.732);
+        vec2 h = r * 0.5;
+        vec2 a = mod(p, r) - h;
+        vec2 b = mod(p - h, r) - h;
+        vec2 g = length(a) < length(b) ? a : b;
+        
+        float d = hexDist(g);
+        float edge = smoothstep(0.42, 0.46, d);
+        
+        vec3 color = mix(vec3(0.05, 0.15, 0.3), vec3(0.0, 1.0, 0.533), coverage);
+        float alpha = edge * (0.15 + coverage * 0.85) + (coverage * 0.2);
+        if (alpha < 0.01) discard;
+        gl_FragColor = vec4(color, alpha);
+    }
+`;
+
+const hexUniforms = {
+    activeSatPos: { value: new Float32Array(64 * 3) },
+    intActiveCount: { value: 0 }
+};
+
+const hexGrid = new THREE.Mesh(
+    new THREE.SphereGeometry(EARTH_RADIUS + 40, 256, 128),
+    new THREE.ShaderMaterial({
+        uniforms: hexUniforms,
+        vertexShader: hexVertexShader,
+        fragmentShader: hexFragmentShader,
+        transparent: true,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        depthTest: true
+    })
+);
+hexGrid.rotation.y = Math.PI;
+scene.add(hexGrid);
+
 // --- CONSTELLATION ---
 let satellites = [];
 const satellitePool = []; 
@@ -322,6 +421,21 @@ const updateConnectivity = () => {
             sat.footprint.material.opacity = 0.08;
         }
     });
+
+    // Update Hex Shader Uniforms
+    let activeIdx = 0;
+    satellites.forEach(sat => {
+        if (activeSatSats.has(sat) && activeIdx < 64) {
+            sat.mesh.getWorldPosition(_vec1);
+            _vec1.normalize();
+            hexUniforms.activeSatPos.value[activeIdx * 3 + 0] = _vec1.x;
+            hexUniforms.activeSatPos.value[activeIdx * 3 + 1] = _vec1.y;
+            hexUniforms.activeSatPos.value[activeIdx * 3 + 2] = _vec1.z;
+            activeIdx++;
+        }
+    });
+    hexUniforms.intActiveCount.value = activeIdx;
+
     inputs.statusBox.style.display = (isGatewayActive && gateways.length === 1) ? 'block' : 'none';
 };
 
@@ -419,6 +533,7 @@ const animate = () => {
     if (currentSpeed > 0) {
         time += currentSpeed / 1000;
         earth.rotation.y -= 0.0002;
+        hexGrid.rotation.y = earth.rotation.y;
         clouds.rotation.y -= 0.0003;
         atmosphere.rotation.y -= 0.0002;
     }
