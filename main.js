@@ -48,11 +48,14 @@ scene.add(sunLight);
 
 // --- TEXTURES & ASSETS ---
 const textureLoader = new THREE.TextureLoader();
-const earthTexture = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg');
-const earthBumpMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg');
-const earthSpecularMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_specular_2048.jpg');
-const earthNightMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_lights_2048.png');
-const earthCloudsMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_clouds_2048.png');
+// Using high-vibrancy NASA Blue Marble style textures
+const earthTexture = textureLoader.load('https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg');
+const earthBumpMap = textureLoader.load('https://threejs.org/examples/textures/planets/earth_normal_2048.jpg');
+const earthSpecularMap = textureLoader.load('https://threejs.org/examples/textures/planets/earth_specular_2048.jpg');
+const earthNightMap = textureLoader.load('https://threejs.org/examples/textures/planets/earth_lights_2048.png');
+const earthCloudsMap = textureLoader.load('https://threejs.org/examples/textures/planets/earth_clouds_2048.png');
+const earthBordersMap = textureLoader.load('https://raw.githubusercontent.com/gregoiredavy/threejs-earth/master/assets/textures/earth_borders.png');
+const politicalBordersMap = textureLoader.load('https://raw.githubusercontent.com/master-of-the-force/threejs-earth/master/assets/borders.png');
 const satelliteTexture = textureLoader.load('AST Bluebird.png');
 
 // --- EARTH & ATMOSPHERE ---
@@ -67,21 +70,29 @@ const earth = new THREE.Mesh(
         shininess: 15,
         emissiveMap: earthNightMap,
         emissive: new THREE.Color(0xaaccff),
-        emissiveIntensity: 0.7
+        emissiveIntensity: 0.8
     })
 );
 earth.rotation.y = Math.PI;
 scene.add(earth);
 
+const borders = new THREE.Mesh(
+    new THREE.SphereGeometry(EARTH_RADIUS + 2, 128, 128),
+    new THREE.MeshBasicMaterial({ map: earthBordersMap, transparent: true, opacity: 0.8, color: 0xffffff, side: THREE.FrontSide, depthWrite: false })
+);
+borders.rotation.y = Math.PI;
+scene.add(borders);
+
+const political = new THREE.Mesh(
+    new THREE.SphereGeometry(EARTH_RADIUS + 3, 128, 128),
+    new THREE.MeshBasicMaterial({ map: politicalBordersMap, transparent: true, opacity: 0.5, color: 0x00ffff, side: THREE.FrontSide, depthWrite: false })
+);
+political.rotation.y = Math.PI;
+scene.add(political);
+
 const clouds = new THREE.Mesh(
     new THREE.SphereGeometry(EARTH_RADIUS + 25, 128, 128),
-    new THREE.MeshLambertMaterial({ 
-        map: earthCloudsMap, 
-        transparent: true, 
-        opacity: 0.4, 
-        depthWrite: false,
-        alphaTest: 0.01
-    })
+    new THREE.MeshLambertMaterial({ map: earthCloudsMap, transparent: true, opacity: 0.4, depthWrite: false, alphaTest: 0.01 })
 );
 clouds.rotation.y = Math.PI;
 scene.add(clouds);
@@ -102,11 +113,7 @@ scene.add(new THREE.Mesh(
 const latLonToXYZ = (lat, lon, radius) => {
     const phi = (90 - lat) * (Math.PI / 180);
     const theta = (lon + 180) * (Math.PI / 180);
-    return new THREE.Vector3(
-        -(radius * Math.sin(phi) * Math.cos(theta)),
-        radius * Math.cos(phi),
-        radius * Math.sin(phi) * Math.sin(theta)
-    );
+    return new THREE.Vector3(-(radius * Math.sin(phi) * Math.cos(theta)), radius * Math.cos(phi), radius * Math.sin(phi) * Math.sin(theta));
 };
 
 let gateways = [];
@@ -135,9 +142,7 @@ const createGateway = (localPos) => {
     return { marker, beams: gwBeams };
 };
 
-// Initial Gateway
-const midlandPos = latLonToXYZ(31.9974, -102.0779, EARTH_RADIUS);
-const firstGW = createGateway(midlandPos);
+const firstGW = createGateway(latLonToXYZ(31.9974, -102.0779, EARTH_RADIUS));
 firstGW.marker.visible = false;
 gateways.push(firstGW);
 gatewayGroup.add(firstGW.marker);
@@ -189,7 +194,6 @@ const createSatelliteObject = (haloGeom) => {
 const createConstellation = () => {
     const orbitalRadius = EARTH_RADIUS + config.altitude;
     const F = config.phasing;
-
     const angleRadius = FOOTPRINT_RADIUS / EARTH_RADIUS;
     const haloGeom = new THREE.SphereGeometry(EARTH_RADIUS + FOOTPRINT_OFFSET, 32, 16, 0, Math.PI * 2, 0, angleRadius);
     haloGeom.rotateX(Math.PI / 2);
@@ -229,11 +233,13 @@ const createConstellation = () => {
 };
 
 const updateSatellites = () => {
+    const sInc = Math.sin(config.inclination);
+    const cInc = Math.cos(config.inclination);
     satellites.forEach((sat) => {
         const angle = sat.meanAnomaly + time;
         const zp = -sat.orbitalRadius * Math.sin(angle);
-        const y_incl = zp * Math.sin(config.inclination);
-        const z_incl = zp * Math.cos(config.inclination);
+        const y_incl = zp * sInc;
+        const z_incl = zp * cInc;
         const xp = sat.orbitalRadius * Math.cos(angle);
         sat.mesh.position.set(xp * Math.cos(sat.raan) + z_incl * Math.sin(sat.raan), y_incl, -xp * Math.sin(sat.raan) + z_incl * Math.cos(sat.raan));
         sat.icon.lookAt(0, 0, 0);
@@ -242,13 +248,13 @@ const updateSatellites = () => {
 };
 
 // --- CONNECTIVITY LOOP ---
-const updateConnectivity = () => {
-    // 1. Reset all beams and visibility
-    gateways.forEach(gw => {
-        gw.beams.forEach(b => b.visible = false);
-        gw.activeAntennas = 0; // Reset counter for assignment
-    });
+const _vecPool = Array.from({ length: 2000 }, () => new THREE.Vector3());
+let _poolIdx = 0;
+const getPoolVec = () => _vecPool[_poolIdx++ % 2000];
 
+const updateConnectivity = () => {
+    _poolIdx = 0;
+    gateways.forEach(gw => { gw.beams.forEach(b => b.visible = false); gw.activeAntennas = 0; });
     const isGatewayActive = inputs.toggle.checked;
     const isFOVActive = inputs.fov.checked;
     const maxGWs = parseInt(inputs.gateways.value);
@@ -257,56 +263,41 @@ const updateConnectivity = () => {
 
     if (isGatewayActive) {
         const activeGateways = gateways.slice(0, maxGWs);
-        activeGateways.forEach(gw => gw.marker.visible = true);
-
-        // 2. Collect the BEST possible gateway for every single satellite
-        const globalPotentialLinks = [];
-
-        satellites.forEach(sat => {
-            sat.mesh.getWorldPosition(_vec2); // Sat world pos
-
-            let bestElev = -999;
-            let bestGW = null;
-
-            activeGateways.forEach(gw => {
-                gw.marker.getWorldPosition(_vec1); // GW world pos
-                const groundNormal = _vec1.clone().normalize();
-                const vecToSat = _vec2.clone().sub(_vec1).normalize();
-                const elevation = Math.asin(Math.max(-1, Math.min(1, groundNormal.dot(vecToSat)))) * (180 / Math.PI);
-
-                if (elevation >= 10 && elevation > bestElev) {
-                    bestElev = elevation;
-                    bestGW = gw;
-                }
-            });
-
-            if (bestGW) {
-                globalPotentialLinks.push({
-                    sat: sat,
-                    gw: bestGW,
-                    elevation: bestElev,
-                    satWorldPos: _vec2.clone()
-                });
-            }
+        const gatewayData = activeGateways.map(gw => {
+            gw.marker.visible = true;
+            const pos = new THREE.Vector3();
+            gw.marker.getWorldPosition(pos);
+            return { gw, pos, normal: pos.clone().normalize() };
         });
 
-        // 3. Sort ALL potential links by elevation (highest first)
+        const globalPotentialLinks = [];
+        const satLinkCounts = new Map();
+        
+        satellites.forEach(sat => {
+            const satWorldPos = getPoolVec();
+            sat.mesh.getWorldPosition(satWorldPos);
+            const satPotentialLinks = [];
+            gatewayData.forEach(data => {
+                const vecToSat = getPoolVec().subVectors(satWorldPos, data.pos).normalize();
+                const elevation = Math.asin(Math.max(-1, Math.min(1, data.normal.dot(vecToSat)))) * (180 / Math.PI);
+                if (elevation >= 10) {
+                    satPotentialLinks.push({ sat, gw: data.gw, elevation, satWorldPos, gwPos: data.pos });
+                }
+            });
+            if (satPotentialLinks.length > 1) satPotentialLinks.sort((a, b) => b.elevation - a.elevation);
+            for (let i = 0; i < Math.min(satPotentialLinks.length, 3); i++) globalPotentialLinks.push(satPotentialLinks[i]);
+        });
+
         globalPotentialLinks.sort((a, b) => b.elevation - a.elevation);
-
-        // 4. Assign links based on Priority + Gateway Capacity
         globalPotentialLinks.forEach(link => {
-            if (link.gw.activeAntennas < antennaLimit) {
-                const gwIdx = activeGateways.indexOf(link.gw);
+            const currentSatLinks = satLinkCounts.get(link.sat) || 0;
+            if (link.gw.activeAntennas < antennaLimit && currentSatLinks < 3) {
                 const beamIdx = link.gw.activeAntennas;
-
                 link.gw.beams[beamIdx].visible = true;
-                link.gw.marker.getWorldPosition(_vec1);
-                link.gw.beams[beamIdx].geometry.setFromPoints([_vec1, link.satWorldPos]);
-
+                link.gw.beams[beamIdx].geometry.setFromPoints([link.gwPos, link.satWorldPos]);
                 activeSatSats.add(link.sat);
                 link.gw.activeAntennas++;
-
-                // Special Case: Update UI if only 1 Gateway is active
+                satLinkCounts.set(link.sat, currentSatLinks + 1);
                 if (maxGWs === 1) {
                     document.getElementById('conn-state').innerText = `${link.gw.activeAntennas} ANTENNA${link.gw.activeAntennas > 1 ? 'S' : ''}`;
                     document.getElementById('conn-state').style.color = "#00ff00";
@@ -314,19 +305,13 @@ const updateConnectivity = () => {
                 }
             }
         });
-
-        // Handle "Searching" state for single Gateway UI
         if (maxGWs === 1 && activeGateways[0].activeAntennas === 0) {
             document.getElementById('conn-state').innerText = "SEARCHING...";
             document.getElementById('conn-state').style.color = "#ffcc00";
             document.getElementById('conn-elev').innerText = "---";
         }
+    } else { gateways.forEach(gw => gw.marker.visible = false); }
 
-    } else {
-        gateways.forEach(gw => gw.marker.visible = false);
-    }
-
-    // 5. Update Footprints
     satellites.forEach(sat => {
         sat.footprint.visible = isFOVActive;
         if (activeSatSats.has(sat)) {
@@ -337,8 +322,7 @@ const updateConnectivity = () => {
             sat.footprint.material.opacity = 0.08;
         }
     });
-
-    inputs.statusBox.style.display = (isGatewayActive && maxGWs === 1) ? 'block' : 'none';
+    inputs.statusBox.style.display = (isGatewayActive && gateways.length === 1) ? 'block' : 'none';
 };
 
 // --- UI & INTERACTION ---
@@ -384,8 +368,7 @@ Object.values(inputs).forEach(input => {
     if (!input || input.id === 'gs-status-box' || input.id === 'constellation-info') return;
     input.addEventListener('input', () => {
         const isConfig = !['input-antennas', 'fov-toggle', 'timeSpeed', 'gs-toggle', 'input-gateways'].includes(input.id);
-        if (isConfig) syncConfig();
-        else updateUI();
+        if (isConfig) syncConfig(); else updateUI();
     });
 });
 
@@ -448,7 +431,4 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-createConstellation();
-updateUI();
-updateGuideLines();
-animate();
+createConstellation(); updateUI(); updateGuideLines(); animate();
